@@ -22,6 +22,7 @@ final class EquityTickerTests: XCTestCase {
         XCTAssertEqual(ticker.symbol, "AAPL")
         XCTAssertNil(ticker.name)
         XCTAssertEqual(ticker.currency, Currency.unknown)
+        XCTAssertTrue(ticker.tags.isEmpty)
         XCTAssertNil(ticker.notes)
     }
 
@@ -38,7 +39,9 @@ final class EquityTickerTests: XCTestCase {
 
     func testRoundTrip() throws {
         let original = EquityTicker(symbol: "SHOP.TO", name: "Shopify Inc.",
-                                    currency: .cad, notes: "Long-term hold")
+                                    currency: .cad,
+                                    tags: [Tag("Dividend"), Tag("Long-term hold")],
+                                    notes: "Long-term hold")
         let decoded = try JSONDecoder().decode(
             EquityTicker.self,
             from: JSONEncoder().encode(original)
@@ -47,6 +50,7 @@ final class EquityTickerTests: XCTestCase {
         XCTAssertEqual(decoded.symbol, "SHOP.TO")
         XCTAssertEqual(decoded.name, "Shopify Inc.")
         XCTAssertEqual(decoded.currency, Currency.cad)
+        XCTAssertEqual(decoded.tags, Set([Tag("dividend"), Tag("long-term hold")]))
         XCTAssertEqual(decoded.notes, "Long-term hold")
     }
 
