@@ -1,0 +1,79 @@
+import Foundation
+
+/// A financial account that holds positions (stocks, GICs, cash).
+///
+/// An account is *metadata*: it identifies where money is held and how it
+/// should be reported. Positions live inside accounts once they are defined.
+///
+/// Every account designates a **reporting currency** — the currency in which
+/// the account's total value and P&L are expressed. Positions denominated in
+/// other currencies are converted into the reporting currency when the
+/// account's totals are calculated.
+public struct Account: Identifiable, Codable, Hashable, Sendable {
+    // MARK: Identity
+
+    public let id: UUID
+
+    // MARK: Reporting
+
+    /// The currency in which this account reports its value and P&L.
+    public var reportingCurrency: Currency
+
+    // MARK: Metadata (all optional)
+
+    /// Display name, e.g. `"Desjardins TFSA"`.
+    public var name: String?
+
+    /// The institution holding the account, e.g. `"Wealthsimple"`, `"Desjardins"`.
+    /// A natural grouping key when an account is held by one of several firms.
+    public var institution: String?
+
+    /// The account number.
+    /// Consider storing only a masked suffix (e.g. last 4 digits) — this is PII.
+    public var accountNumber: String?
+
+    /// Whether holdings in this account are taxable.
+    /// Defaults to `true` (conservative): an account is treated as
+    /// non-registered / taxable until explicitly marked otherwise
+    /// (e.g. TFSA, RRSP → `false`).
+    public var taxable: Bool
+
+    /// When the account was opened. Useful for holding-period calculations.
+    public var openedDate: Date?
+
+    /// When the account was closed. `nil` while the account is active;
+    /// set for historical accounts so they don't count toward current totals.
+    public var closedDate: Date?
+
+    /// Free-form notes.
+    public var notes: String?
+
+    // MARK: Init
+
+    public init(
+        id: UUID = UUID(),
+        reportingCurrency: Currency = .cad,
+        name: String? = nil,
+        institution: String? = nil,
+        accountNumber: String? = nil,
+        taxable: Bool = true,
+        openedDate: Date? = nil,
+        closedDate: Date? = nil,
+        notes: String? = nil
+    ) {
+        self.id = id
+        self.reportingCurrency = reportingCurrency
+        self.name = name
+        self.institution = institution
+        self.accountNumber = accountNumber
+        self.taxable = taxable
+        self.openedDate = openedDate
+        self.closedDate = closedDate
+        self.notes = notes
+    }
+
+    // MARK: Derived state
+
+    /// Whether the account is still active.
+    public var isActive: Bool { closedDate == nil }
+}
