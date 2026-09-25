@@ -6,14 +6,15 @@ import Foundation
 ///
 /// ```
 /// Portfolio  ←→  PortfolioStore (JSON codec)  ←→  DataStore (bytes)
-///                                                      ├── FileDataStore
-///                                                      ├── SQLiteDataStore  (to add)
-///                                                      └── RedisDataStore   (to add)
+///                          ▲ injected from env          ├── FileDataStore   (one .dat file per key)
+///                          └ DataStoreFactory          ├── SQLiteDataStore (key/payload table)
+///                                                      └── RedisDataStore  (later)
 /// ```
 ///
 /// A store keeps `Data` under `String` keys. Concrete backends differ in
 /// how they hold those bytes, but callers never see the backend or its
-/// configuration — they depend only on this protocol.
+/// configuration — they depend only on this protocol. Which backend is
+/// active is selected by `DataStoreFactory` from environment variables.
 ///
 /// Implementations must be `Sendable`; all methods are `async` so
 /// backends with real I/O (network databases) can be used without
@@ -38,6 +39,8 @@ public protocol DataStore: Sendable {
 /// `message` (rather than an `underlying: Error`) keeps the type
 /// trivially `Sendable`.
 public enum DataStoreError: Error, Sendable {
+    /// Environment/configuration problem (unknown backend name, etc.).
+    case configuration(message: String)
     /// The backend could not perform the I/O operation.
     case ioFailed(key: String, message: String)
     /// The domain object could not be encoded to bytes.
