@@ -72,6 +72,25 @@ public struct Account: Identifiable, Codable, Hashable, Sendable {
         self.notes = notes
     }
 
+    // MARK: Lenient decoding
+
+    /// `id` is the relational link key, so a record missing it is
+    /// unusable and decoding fails. Everything else degrades to its
+    /// default, matching the init defaults — data saved before a field
+    /// existed still loads.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(UUID.self, forKey: .id)
+        self.reportingCurrency = try c.decodeIfPresent(Currency.self, forKey: .reportingCurrency) ?? .cad
+        self.name = try c.decodeIfPresent(String.self, forKey: .name)
+        self.institution = try c.decodeIfPresent(String.self, forKey: .institution)
+        self.accountNumber = try c.decodeIfPresent(String.self, forKey: .accountNumber)
+        self.taxable = try c.decodeIfPresent(Bool.self, forKey: .taxable) ?? true
+        self.openedDate = try c.decodeIfPresent(Date.self, forKey: .openedDate)
+        self.closedDate = try c.decodeIfPresent(Date.self, forKey: .closedDate)
+        self.notes = try c.decodeIfPresent(String.self, forKey: .notes)
+    }
+
     // MARK: Derived state
 
     /// Whether the account is still active.
