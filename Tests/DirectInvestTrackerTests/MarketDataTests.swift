@@ -210,4 +210,23 @@ struct MarketDataTests {
         }
         #expect(found == 200) // no lost updates
     }
+
+    @Test func lastPriceAdapterRequiresFreshMatchingQuote() {
+        let now = Date()
+        let price: Decimal = Decimal(string: "82.15")!
+        let cache = MarketDataCache()
+        cache.upsert(MarketQuote(symbol: "SHOP.TO", currency: .cad, price: price, asOf: now))
+
+        #expect(cache.lastPrice(for: .cad, symbol: "shop.to", now: now) == price) // case-insensitive lookup
+        #expect(cache.lastPrice(for: .usd, symbol: "SHOP.TO", now: now) == nil)   // quoted in a different currency
+    }
+
+    @Test func lastPriceAdapterRejectsStaleQuotes() {
+        let now = Date()
+        let cache = MarketDataCache()
+        cache.upsert(MarketQuote(symbol: "AAPL", currency: .usd, price: 250,
+                                 asOf: now.addingTimeInterval(-3_600)))
+        #expect(cache.quote(for: "AAPL") != nil) // still cached…
+        #expect(cache.lastPrice(for: .usd, symbol: "AAPL", now: now) == nil) // …but too old to value
+    }
 }

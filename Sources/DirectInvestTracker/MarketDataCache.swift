@@ -118,4 +118,17 @@ public struct MarketDataCache: @unchecked Sendable {
         guard let rate = rate(from: from, to: to), rate.isFresh(maxAge: maxAge, now: now) else { return nil }
         return rate
     }
+
+    // MARK: Closure adapters
+
+    /// The ``LastPrice`` closure: the cached price of `symbol` when the
+    /// observation is fresh **and** quoted in exactly `currency`. A stale
+    /// quote or a quote in a different currency yields `nil` — the caller
+    /// then falls back to cost basis, which is the safe answer for a
+    /// position that cannot be marked in its own denomination.
+    public func lastPrice(for currency: Currency, symbol: String, maxAge: TimeInterval = 60, now: Date = .now) -> Decimal? {
+        guard let quote = freshQuote(for: symbol, maxAge: maxAge, now: now) else { return nil }
+        guard quote.currency == currency else { return nil }
+        return quote.price
+    }
 }
