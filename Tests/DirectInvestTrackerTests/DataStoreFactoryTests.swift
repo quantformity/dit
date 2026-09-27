@@ -84,6 +84,25 @@ final class DataStoreFactoryTests: XCTestCase {
         XCTAssertEqual(config.url.lastPathComponent, "DirectInvestTracker")
     }
 
+    /// Regression: `urls(for: .userDirectory, in: .userDomainMask)`
+    /// returns *empty* on some macOS releases, which once made the
+    /// default fall back to `/` and thus the system-wide
+    /// `/Library/Application Support` — not writable. The default must
+    /// always resolve inside the user's home directory.
+    func testDefaultStoreURLIsInsideUserHome() throws {
+        let storeURL = DataStoreFactory.defaultStoreURL
+        let home = fileManager.homeDirectoryForCurrentUser.standardizedFileURL.path
+        XCTAssertTrue(
+            storeURL.standardizedFileURL.path.hasPrefix(home),
+            "default store \(storeURL.path) must be inside home \(home)"
+        )
+        // And it must be writable — the whole point of a user store.
+        try fileManager.createDirectory(at: storeURL, withIntermediateDirectories: true)
+        let probe = storeURL.appendingPathComponent(".write-probe")
+        try Data("ok".utf8).write(to: probe, options: .atomic)
+        try fileManager.removeItem(at: probe)
+    }
+
     func testEnvironmentSelectsSqlite() throws {
         let env = [
             DataStoreFactory.backendKey: "SQLITE", // case-insensitive

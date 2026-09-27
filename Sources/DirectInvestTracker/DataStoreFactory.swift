@@ -56,9 +56,15 @@ public struct DataStoreFactory: Sendable {
     }
 
     /// Where stores live when `DIT_STORE_URL` is not set.
+    ///
+    /// Tries `urls(for: .userDirectory, in: .userDomainMask)` first —
+    /// which some macOS releases return *empty* for — and falls back to
+    /// `homeDirectoryForCurrentUser` (HOME-based, reliable). Never a
+    /// system directory: a store that cannot be written is useless.
     public static var defaultStoreURL: URL {
-        let home = FileManager.default.urls(for: .userDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: "/")
+        let home = FileManager.default
+            .urls(for: .userDirectory, in: .userDomainMask)
+            .first ?? FileManager.default.homeDirectoryForCurrentUser
         return home
             .appendingPathComponent("Library/Application Support/DirectInvestTracker", isDirectory: true)
     }
