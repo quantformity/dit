@@ -23,10 +23,12 @@ enum Main {
 
     OPTIONS:
       --display <CCY>   Display currency, ISO code (default CAD)
+      --backend <name>  file | sqlite (overrides DIT_BACKEND)
+      --store <path>    Store path (overrides DIT_STORE_URL)
       --offline         Skip the market-data fetch: positions at cost
                         basis, no FX conversion
 
-    STORE (environment variables):
+    STORE (environment variables; command-line options win):
       DIT_BACKEND     file (default) | sqlite
       DIT_STORE_URL   store path (default ~/Library/Application Support/DirectInvestTracker)
     """
@@ -37,6 +39,8 @@ enum Main {
         var command: Command = .summary
         var display: Currency = .cad
         var offline = false
+        var backend: String?
+        var store: String?
 
         do {
             var index = 1
@@ -57,6 +61,22 @@ enum Main {
                     display = currency
                 case "--offline":
                     offline = true
+                case "--backend":
+                    index += 1
+                    guard index < args.count else {
+                        throw UsageError("--backend needs a value (file | sqlite)")
+                    }
+                    let raw = args[index].lowercased()
+                    guard ["file", "sqlite"].contains(raw) else {
+                        throw UsageError("unknown backend '\(args[index])' (expected: file | sqlite)")
+                    }
+                    backend = raw
+                case "--store":
+                    index += 1
+                    guard index < args.count, !args[index].isEmpty else {
+                        throw UsageError("--store needs a path")
+                    }
+                    store = args[index]
                 default:
                     if args[index].hasPrefix("-") {
                         throw UsageError("unknown option '\(args[index])'")
@@ -69,7 +89,7 @@ enum Main {
                 index += 1
             }
         } catch {
-            FileHandle.standardError.write(Data("\(error)\n\n\(usage)\n".utf8))
+            FileHandle.standardError.write(Data("\(error.localizedDescription)\n\n\(usage)\n".utf8))
             exit(2)
         }
 
@@ -79,7 +99,12 @@ enum Main {
         }
 
         // --- Load the portfolio -----------------------------------------
-        let factory = DataStoreFactory()
+        // Command-line options override the environment; the factory
+        // stays the single place that interprets the configuration.
+        var environment = ProcessInfo.processInfo.environment
+        if let backend { environment[DataStoreFactory.backendKey] = backend }
+        if let store { environment[DataStoreFactory.storeURLKey] = store }
+        let factory = DataStoreFactory(environment: environment)
         do {
             let configuration = try factory.configuration()
             let store = try factory.make()
