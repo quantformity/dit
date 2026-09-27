@@ -112,6 +112,28 @@ public struct MarketDataCache: @unchecked Sendable {
         return rate.rate(from: from, to: to)
     }
 
+    /// Convert between two currencies using stored observations,
+    /// **routing through `hub`** when no direct pair is stored:
+    ///
+    /// 1. a measured `from→to` pair (either direction) wins — it is a
+    ///    direct observation, not a composition;
+    /// 2. otherwise the product of the two hub legs, `from→hub ×
+    ///    hub→to` (each reciprocated as needed).
+    ///
+    /// This is what makes the USD-hub fetch strategy (one rate fetch
+    /// per currency, see ``MarketDataPlan``) serve arbitrary currency
+    /// pairs. `nil` when either leg is missing.
+    public func routedRate(from: Currency, to: Currency, hub: Currency = .usd) -> Decimal? {
+        if from == to { return 1 }
+        if from == hub || to == hub { return rateValue(from: from, to: to) }
+        // A measured direct pair beats a composed one — it was actually
+        // observed, not derived from two other observations.
+        if let direct = rateValue(from: from, to: to) { return direct }
+        guard let first = rateValue(from: from, to: hub), first != 0,
+              let second = rateValue(from: hub, to: to) else { return nil }
+        return first * second
+    }
+
     /// Like ``rate(from:to:)``, but only when the observation is younger
     /// than `maxAge` (default 1 hour).
     public func freshRate(from: Currency, to: Currency, maxAge: TimeInterval = 3600, now: Date = .now) -> ExchangeRate? {

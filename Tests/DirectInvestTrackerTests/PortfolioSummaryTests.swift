@@ -261,4 +261,25 @@ struct PortfolioSummaryTests {
         #expect(s3.totalValue == 10_000)
         #expect(s3.holdings[0].unrealizedPnL == nil)
     }
+
+    // MARK: marketDataPlan
+
+    @Test func marketDataPlanCollectsPositionSymbolsAndNonHubCurrencies() {
+        let plan = portfolio.marketDataPlan() // display CAD, hub USD
+
+        // Open positions only — fully sold and redeemed things are
+        // gone (SHOP.TO in USD is still held, via Questrade).
+        #expect(plan.symbols == ["ENB.TO", "SHOP.TO"])
+        // Currencies involved: CAD (TD) + USD (Questrade) + display
+        // CAD. The hub (USD) needs no fetch; CAD does.
+        #expect(plan.fxCurrencies == [.cad])
+        #expect(plan.hub == .usd)
+    }
+
+    @Test func marketDataPlanAllHubCurrencyNeedsNoFx() {
+        let allUsd = Portfolio(accounts: [qt], transactions: [deposit(qt, 1_000, on: day(1))])
+        let plan = allUsd.marketDataPlan(displayCurrency: .usd)
+        #expect(plan.symbols.isEmpty)
+        #expect(plan.fxCurrencies.isEmpty)
+    }
 }

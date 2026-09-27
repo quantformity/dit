@@ -229,4 +229,70 @@ struct MarketDataTests {
         #expect(cache.quote(for: "AAPL") != nil) // still cached…
         #expect(cache.lastPrice(for: .usd, symbol: "AAPL", now: now) == nil) // …but too old to value
     }
+
+    // MARK: routedRate (USD-hub routing)
+
+    @Test func routedRateComposesHubLegs() {
+        // 1 / 1.25 = 0.8 exactly, 1 / 1.6 = 0.625 exactly — both legs
+        // are finite decimals, so the product is exact: 0.5.
+        let cache = MarketDataCache()
+        cache.upsert(
+            ExchangeRate(
+                base: .usd, quote: .cad, rate: Decimal(string: "1.25")!,
+                asOf: Date(timeIntervalSince1970: 1_000_000), source: "test"
+            )
+        )
+        cache.upsert(
+            ExchangeRate(
+                base: .eur, quote: .usd, rate: Decimal(string: "1.6")!,
+                asOf: Date(timeIntervalSince1970: 1_000_000), source: "test"
+            )
+        )
+
+        #expect(cache.routedRate(from: .cad, to: .eur) == Decimal(string: "0.5")!)
+        #expect(cache.routedRate(from: .eur, to: .cad) == Decimal(string: "2")!)
+        // A leg missing on either side makes the pair unroutable.
+        #expect(cache.routedRate(from: .cad, to: .jpy) == nil)
+    }
+
+    @Test func routedRateHubLegsAndIdentity() {
+        let cache = MarketDataCache()
+        cache.upsert(
+            ExchangeRate(
+                base: .usd, quote: .cad, rate: Decimal(string: "1.35")!,
+                asOf: Date(timeIntervalSince1970: 1_000_000), source: "test"
+            )
+        )
+        // One leg IS the stored hub rate — no composition involved.
+        #expect(cache.routedRate(from: .usd, to: .cad) == Decimal(string: "1.35")!)
+        let reciprocal = Decimal(1) / Decimal(string: "1.35")!
+        #expect(cache.routedRate(from: .cad, to: .usd) == reciprocal)
+        // Same-currency identity needs no observation at all.
+        #expect(cache.routedRate(from: .eur, to: .eur) == 1)
+    }
+
+    @Test func routedRatePrefersADirectPairOverComposition() {
+        let cache = MarketDataCache()
+        cache.upsert(
+            ExchangeRate(
+                base: .usd, quote: .cad, rate: Decimal(string: "1.25")!,
+                asOf: Date(timeIntervalSince1970: 1_000_000), source: "test"
+            )
+        )
+        cache.upsert(
+            ExchangeRate(
+                base: .usd, quote: .eur, rate: Decimal(string: "1.6")!,
+                asOf: Date(timeIntervalSince1970: 1_000_000), source: "test"
+            )
+        )
+        // The composed answer would be 0.8 / 1.6 = 0.5; a directly
+        // measured pair wins — it was actually observed.
+        cache.upsert(
+            ExchangeRate(
+                base: .cad, quote: .eur, rate: Decimal(string: "0.6")!,
+                asOf: Date(timeIntervalSince1970: 1_000_000), source: "test"
+            )
+        )
+        #expect(cache.routedRate(from: .cad, to: .eur) == Decimal(string: "0.6")!)
+    }
 }

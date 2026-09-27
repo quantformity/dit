@@ -327,21 +327,30 @@ extension Portfolio {
         )
     }
 
-    /// A summary valued against the observations in `cache`: FX rates
-    /// via ``MarketDataCache/rateValue(from:to:)`` (stored rates are
-    /// used regardless of age — FX moves slowly), quotes via
+    /// A summary valued against the observations in `cache`: FX via
+    /// ``MarketDataCache/routedRate(from:to:hub:)`` (stored rates are
+    /// used regardless of age — FX moves slowly; pairs with no direct
+    /// observation are composed through the USD hub), quotes via
     /// ``MarketDataCache/lastPrice(for:symbol:maxAge:now:)`` (fresh
     /// quotes only; positions without a fresh quote fall back to cost
     /// basis and are excluded from P&L).
+    ///
+    /// - Parameter maxAge: how old a quote may be and still drive a
+    ///   valuation. The default (60 s) is the strict, live-trading
+    ///   rule; a summary tool run outside market hours may pass a
+    ///   wider window (e.g. 3 days) because the last close *is* the
+    ///   best known price — but should then display the data's age to
+    ///   the user.
     public func summary(
         from cache: MarketDataCache,
         displayCurrency: Currency = .cad,
+        maxAge: TimeInterval = 60,
         now: Date = .now
     ) -> PortfolioSummary {
         summary(
             displayCurrency: displayCurrency,
-            rate: cache.rateValue,
-            lastPrice: { currency, symbol in cache.lastPrice(for: currency, symbol: symbol, now: now) }
+            rate: { from, to in cache.routedRate(from: from, to: to) },
+            lastPrice: { currency, symbol in cache.lastPrice(for: currency, symbol: symbol, maxAge: maxAge, now: now) }
         )
     }
 }
