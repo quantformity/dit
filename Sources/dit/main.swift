@@ -189,8 +189,8 @@ enum Main {
             i += 1
         }
 
-        invocation.group = words.first ?? "summary"
-        if words.count > 1 { invocation.sub = words[1] }
+        invocation.group = words.first ?? ""
+        if words.first != nil && words.count > 1 { invocation.sub = words[1] }
         invocation.rest = rest
         return (invocation, global)
     }
@@ -199,7 +199,7 @@ enum Main {
 
     private static func run(_ invocation: Invocation, global: Global) async throws {
         switch (invocation.group, invocation.sub) {
-        case ("summary", _), ("", _):
+        case ("", _), ("summary", _):
             try await summary(global: global)
         case ("accounts", _):
             try await accountsList(global: global)
@@ -1798,7 +1798,27 @@ enum Main {
 
     private static func helpText(for invocation: Invocation) -> String {
         switch (invocation.group, invocation.sub) {
-        case ("", _), ("summary", _):
+        case ("", _):
+            return """
+            USAGE: dit [command] [options]
+
+              dit                        portfolio summary (default)
+              dit summary [options]      portfolio summary
+              dit accounts               list accounts
+              dit account <sub> [args]   manage accounts (see: dit account --help)
+              dit tx <sub> [args]        list & manage transactions (see: dit tx --help)
+              dit ticker <sub> [args]    manage the instrument registry (see: dit ticker --help)
+              dit store <sub> [args]     path / export / backup / import (see: dit store --help)
+              dit quote <SYM> [...]      live price lookup (see: dit quote --help)
+              dit help [command]         help
+
+              Global options: --display CCY, --offline, --backend file|sqlite,
+              --store PATH, -h/--help. Flags override environment variables.
+              Exit codes: 0 success, 1 runtime error, 2 usage error.
+
+              Group help: dit help <group> — e.g. 'dit help account'.
+            """
+        case ("summary", _):
             return """
             USAGE: dit [summary] [--display CCY] [--offline] [--backend file|sqlite] [--store PATH]
 

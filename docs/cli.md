@@ -6,8 +6,9 @@ equities, dividends, GICs, and FX conversions. **Transactions are the
 source of truth**: everything you see (balances, holdings, P&L) is
 derived from the ledger on each read; nothing else is stored.
 
-Run `dit help [command]` anytime — help never mutates, even when attached
-to a command that would.
+Run `dit --help` (or `dit help`) for the full command listing, or
+`dit <group> --help` / `dit help <group>` for one group — help never
+mutates, even when attached to a command that would.
 
 ## Setup & configuration
 
@@ -41,7 +42,7 @@ missing required field).
 | `--offline` | Never touch the network. Commands that *require* a fresh quote hard-error (pass explicit values instead). |
 | `--backend file\|sqlite` | Backends: portable JSON directory, or libsqlite3 database. |
 | `--store PATH` | Where the store lives. With `file`, a directory; with `sqlite`, a database file (a directory is accepted; `portfolio.sqlite` inside it is used). |
-| `-h`, `--help` | Help. Takes precedence over everything in its scope. |
+| `-h`, `--help` | Help. `dit --help` (or `dit help`) prints the full command listing; `dit <group> --help` prints one group's commands. Takes precedence over everything in its scope. |
 
 Flags apply to the whole invocation; any order before or after the
 subcommand is fine.
