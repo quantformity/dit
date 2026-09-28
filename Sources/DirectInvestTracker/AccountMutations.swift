@@ -18,6 +18,9 @@ public enum MutationError: LocalizedError, Equatable {
     case tickerExists(String)
     case tickerNotFound(String)
     case tickerUnchanged(String)
+    case importNoAccount
+    case importMultiAccount(count: Int)
+    case importDanglingAccount(id: UUID)
     case unresolvable(String)
 
     public var errorDescription: String? {
@@ -50,6 +53,15 @@ public enum MutationError: LocalizedError, Equatable {
             return "no registry entry for '\(symbol)' — create one with 'dit ticker add \(symbol)'"
         case .tickerUnchanged(let symbol):
             return "no changes — every supplied value already matches the entry for '\(symbol)'"
+        case .importNoAccount:
+            return "the import file contains no accounts — imports are account-scoped; "
+                + "re-export with 'dit store export --account <account>'"
+        case .importMultiAccount(let count):
+            return "the import file contains \(count) accounts — imports are single-account: "
+                + "re-export the one you want with 'dit store export --account <account>'"
+        case .importDanglingAccount(let id):
+            return "the import file has a transaction for account \(id), which is not among "
+                + "the file's accounts — the export is not self-consistent"
         case .unresolvable(let problem):
             return problem
         }

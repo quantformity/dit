@@ -29,6 +29,12 @@ public struct PortfolioStore: Sendable {
         }
     }
 
+    /// All keys present in the backend (passthrough — useful for
+    /// `dit store path` and future diagnostics).
+    public func keys() async throws -> [String] {
+        try await store.keys()
+    }
+
     /// Replace the stored portfolio with `portfolio`.
     public func save(_ portfolio: Portfolio) async throws {
         let payload: Data
