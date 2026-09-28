@@ -37,6 +37,15 @@ enum Main {
         var errorDescription: String? { "no portfolio found at \(path)" }
     }
 
+    /// A failed live price lookup (exit 1). Recording `--price` by
+    /// hand is always the escape hatch — a fetched price is a
+    /// convenience, never the only path.
+    private struct LookupError: LocalizedError {
+        let message: String
+        init(_ message: String) { self.message = message }
+        var errorDescription: String? { message }
+    }
+
     // MARK: - Parsed invocation
 
     private struct Global {
@@ -266,6 +275,7 @@ enum Main {
             notes.append(contentsOf: stalenessNotes(cache: cache, symbols: plan.symbols))
             summary = portfolio.summary(from: cache, displayCurrency: global.display, maxAge: 3 * 86_400)
         }
+        notes.append(contentsOf: untrackedShortNotes(summary))
 
         print(SummaryRenderer.render(summary, notes: notes))
         print("")
@@ -499,9 +509,18 @@ enum Main {
             try await txCashEntry(deposit: true, args, global: global)
         case "withdraw", "withdrawal":
             try await txCashEntry(deposit: false, args, global: global)
-        case "buy", "sell", "dividend", "gic", "gic-redeem", "fx":
-            throw ParseError("'dit tx \(sub)' arrives in a later release — for now: "
-                + "edit existing records with 'dit tx edit', and the read commands work today")
+        case "buy":
+            try await txTrade(buy: true, args, global: global)
+        case "sell":
+            try await txTrade(buy: false, args, global: global)
+        case "dividend":
+            try await txDividend(args, global: global)
+        case "gic":
+            try await txGicPurchase(args, global: global)
+        case "gic-redeem", "redeem":
+            try await txGicRedeem(args, global: global)
+        case "fx":
+            try await txFx(args, global: global)
         case "edit":
             try await txEdit(args, global: global)
         case "delete", "remove":
@@ -594,6 +613,10 @@ enum Main {
         print("  Account:   \(accountName)")
         print("  Currency:  \(tx.currency.rawValue)")
         print("  Details:   \(tx.summaryLine)")
+        if case .gicPurchase(let gic) = tx.kind {
+            print("  Terms:     compounds \(gic.compounding.rawValue), "
+                + "early redemption \(gic.redeemable ? "allowed" : "not permitted")")
+        }
         print("  Fee:       \(tx.fee.map { money($0, tx.currency) } ?? "—")")
     }
 
@@ -636,6 +659,290 @@ enum Main {
         if !deposit, notes.contains(where: { $0.hasPrefix("warning") }) {
             print("(recorded anyway — the ledger records what happened, not what should fit)")
         }
+    }
+
+    // MARK: Entry commands — buy, sell, dividend, gic, gic-redeem, fx
+
+    private static func txTrade(buy: Bool, _ args: [String], global: Global) async throws {
+        let options = try Options(
+            args,
+            valueOptions: ["account", "ticker", "shares", "price", "currency", "date", "fee"])
+        try rejectPositionals(options, hint: "a trade takes only --options (see 'dit help tx')")
+        let reference = try options.require("account")
+        let symbolRaw = try options.require("ticker")
+        let sharesRaw = try options.require("shares")
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let account = try AccountRef(reference).resolve(in: portfolio)
+        let symbol = try requireSymbol(symbolRaw)
+        let shares = try parseDecimal(sharesRaw, option: "--shares")
+        guard shares > 0 else { throw ParseError("--shares must be greater than 0") }
+
+        // Price: given, or fetched live. No silent zero anywhere — a
+        // trade without a trustworthy price is refused, not recorded
+        // at 0 (which would fabricate a worthless position).
+        var price: Decimal
+        var priceNote: String
+        var quoteCurrency: Currency?
+        if let raw = options["price"] {
+            let value = try parseDecimal(raw, option: "--price")
+            guard value >= 0 else { throw ParseError("--price cannot be negative") }
+            price = value
+            priceNote = "\(trim(value)) recorded as entered"
+        } else {
+            guard !global.offline else {
+                throw ParseError("--price was omitted and --offline is set — prices are only "
+                    + "fetched online; pass --price to record this trade")
+            }
+            let cache = MarketDataCache()
+            do {
+                try await YahooQuoteProvider().refresh(cache, symbols: [symbol])
+            } catch {
+                throw LookupError("price lookup for '\(symbol)' failed: \(error) — "
+                    + "pass --price to record a price yourself")
+            }
+            guard let quote = cache.quote(for: symbol), quote.price > 0 else {
+                throw LookupError("no price found for '\(symbol)' — check the symbol "
+                    + "(Yahoo format: SHOP.TO, AAPL) or pass --price")
+            }
+            price = quote.price
+            if quote.currency != .unknown { quoteCurrency = quote.currency }
+            priceNote = "\(trim(quote.price)) \(quote.currency.rawValue) via "
+                + "\(quote.source ?? "yahoo") as of \(quoteStamp(quote.asOf))"
+        }
+
+        let defaultCurrency = quoteCurrency
+            ?? portfolio.suggestedCurrency(accountID: account.id, symbol: symbol)
+        let details = StockDetails(ticker: symbol, shares: shares, price: price)
+        let tx = Transaction(
+            date: try options["date"].map(parseDate) ?? Date(),
+            accountID: account.id,
+            currency: try entryCurrency(options, fallback: defaultCurrency),
+            kind: buy ? .stockPurchase(details) : .stockSale(details),
+            fee: try entryFee(options))
+
+        // The twin of the withdrawal overdraft warning: selling more than
+        // the account holds is recorded (it may well have happened), but
+        // it is announced.
+        var shortNote: String?
+        if !buy {
+            var held: Decimal = 0
+            for other in portfolio.transactions where other.accountID == account.id {
+                switch other.kind {
+                case .stockPurchase(let d) where d.ticker == symbol: held += d.shares
+                case .stockSale(let d) where d.ticker == symbol: held -= d.shares
+                default: break
+                }
+            }
+            if held - shares < 0 {
+                shortNote = "warning: '\(account.displayName)' ends up SHORT "
+                    + "\(trim(shares - held)) \(symbol) — double-check that this sale happened"
+            }
+        }
+
+        let (updated, notes) = try portfolio.addingTransaction(tx)
+        try await store.save(updated)
+        print("price: \(priceNote)")
+        for note in notes { print(note) }
+        if let shortNote { print(shortNote) }
+    }
+
+    private static func txDividend(_ args: [String], global: Global) async throws {
+        let options = try Options(
+            args,
+            valueOptions: ["account", "ticker", "amount", "currency", "date", "fee"])
+        try rejectPositionals(options, hint: "a dividend takes only --options (see 'dit help tx')")
+        let reference = try options.require("account")
+        let symbolRaw = try options.require("ticker")
+        let amountRaw = try options.require("amount")
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let account = try AccountRef(reference).resolve(in: portfolio)
+        let symbol = try requireSymbol(symbolRaw)
+        let amount = try parseDecimal(amountRaw, option: "--amount")
+        guard amount > 0 else { throw ParseError("--amount must be greater than 0") }
+        let tx = Transaction(
+            date: try options["date"].map(parseDate) ?? Date(),
+            accountID: account.id,
+            currency: try entryCurrency(
+                options,
+                fallback: portfolio.suggestedCurrency(accountID: account.id, symbol: symbol)),
+            kind: .dividend(DividendDetails(ticker: symbol, amount: amount)),
+            fee: try entryFee(options))
+        let (updated, notes) = try portfolio.addingTransaction(tx)
+        try await store.save(updated)
+        for note in notes { print(note) }
+    }
+
+    private static func txGicPurchase(_ args: [String], global: Global) async throws {
+        let options = try Options(
+            args,
+            valueOptions: ["account", "product", "principal", "rate", "compounding",
+                           "maturity", "currency"],
+            flagOptions: ["redeemable"])
+        try rejectPositionals(options, hint: "a GIC takes only --options (see 'dit help tx')")
+        let reference = try options.require("account")
+        let product = try options.require("product")
+        let principalRaw = try options.require("principal")
+        let rateRaw = try options.require("rate")
+        let maturityRaw = try options.require("maturity")
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let account = try AccountRef(reference).resolve(in: portfolio)
+        let principal = try parseDecimal(principalRaw, option: "--principal")
+        guard principal > 0 else { throw ParseError("--principal must be greater than 0") }
+        var compounding = GICCompounding.annual
+        if let raw = options["compounding"] {
+            guard let parsed = GICCompounding.allCases
+                .first(where: { normalizeToken($0.rawValue) == normalizeToken(raw) }) else {
+                throw ParseError("unknown compounding '\(raw)' — one of: "
+                    + GICCompounding.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            compounding = parsed
+        }
+        let redeemable = options.flag("redeemable") == true
+        let tx = Transaction(
+            date: try options["date"].map(parseDate) ?? Date(),
+            accountID: account.id,
+            currency: try entryCurrency(options, fallback: account.reportingCurrency),
+            kind: .gicPurchase(GICDetails(
+                product: product,
+                principal: principal,
+                rate: try parseRate(rateRaw),
+                compounding: compounding,
+                maturityDate: try parseDate(maturityRaw),
+                redeemable: redeemable)))
+        let (updated, notes) = try portfolio.addingTransaction(tx)
+        try await store.save(updated)
+        for note in notes { print(note) }
+        print("recorded as compounding \(compounding.rawValue), early redemption "
+            + (redeemable ? "allowed" : "not permitted")
+            + " — correct with 'dit tx edit <id>' if that is wrong")
+    }
+
+    private static func txGicRedeem(_ args: [String], global: Global) async throws {
+        let options = try Options(
+            args,
+            valueOptions: ["account", "gic", "proceeds", "currency", "date", "fee"])
+        try rejectPositionals(options, hint: "name the GIC with --gic (see 'dit help tx')")
+        let reference = try options.require("account")
+        let gicRaw = try options.require("gic")
+        let proceedsRaw = try options.require("proceeds")
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let account = try AccountRef(reference).resolve(in: portfolio)
+        // Redeeming names its GIC — product name or transaction id.
+        // No match or an ambiguous one lists the account's live GICs;
+        // a redemption is never attributed by guesswork.
+        let purchase = try portfolio.findGICPurchase(accountID: account.id, reference: gicRaw)
+        let proceeds = try parseDecimal(proceedsRaw, option: "--proceeds")
+        guard proceeds > 0 else { throw ParseError("--proceeds must be greater than 0") }
+        let tx = Transaction(
+            date: try options["date"].map(parseDate) ?? Date(),
+            accountID: account.id,
+            // Proceeds arrive in whatever currency the GIC was taken in.
+            currency: try entryCurrency(options, fallback: purchase.currency),
+            kind: .gicRedemption(GICRedemptionDetails(purchaseID: purchase.id, proceeds: proceeds)),
+            fee: try entryFee(options))
+        let (updated, notes) = try portfolio.addingTransaction(tx)
+        try await store.save(updated)
+        for note in notes { print(note) }
+        print("against '\(purchase.summaryLine)' "
+            + "[\(String(purchase.id.uuidString.prefix(8)))]")
+        if case .gicPurchase(let details) = purchase.kind, proceeds < details.principal {
+            print("warning: a redemption ENDS the GIC here — the remaining "
+                + "\(trim(details.principal - proceeds)) \(purchase.currency.rawValue) of principal is booked "
+                + "as gone with this redemption (all-or-nothing model). If only part came back, "
+                + "delete this redemption and record what actually happened instead")
+        }
+    }
+
+    private static func txFx(_ args: [String], global: Global) async throws {
+        let options = try Options(
+            args,
+            valueOptions: ["account", "from", "to", "from-amount", "to-amount", "date", "fee"])
+        try rejectPositionals(options, hint: "a currency conversion takes only --options "
+            + "(see 'dit help tx')")
+        let reference = try options.require("account")
+        let fromRaw = try options.require("from")
+        let toRaw = try options.require("to")
+        let fromAmountRaw = try options.require("from-amount")
+        let toAmountRaw = try options.require("to-amount")
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let account = try AccountRef(reference).resolve(in: portfolio)
+        let from = try parseCurrency(fromRaw, option: "--from")
+        let to = try parseCurrency(toRaw, option: "--to")
+        guard from != to else {
+            throw ParseError("--from and --to must differ — that is not a conversion")
+        }
+        let fromAmount = try parseDecimal(fromAmountRaw, option: "--from-amount")
+        let toAmount = try parseDecimal(toAmountRaw, option: "--to-amount")
+        guard fromAmount > 0, toAmount > 0 else {
+            throw ParseError("--from-amount and --to-amount must both be greater than 0 — "
+                + "both sides of a conversion are facts you know")
+        }
+        let tx = Transaction(
+            date: try options["date"].map(parseDate) ?? Date(),
+            accountID: account.id,
+            currency: to,
+            kind: .fxConversion(FXDetails(
+                fromCurrency: from, fromAmount: fromAmount, toAmount: toAmount)),
+            fee: try entryFee(options))
+        let (updated, notes) = try portfolio.addingTransaction(tx)
+        try await store.save(updated)
+        for note in notes { print(note) }
+    }
+
+    // MARK: Entry helpers
+
+    private static func rejectPositionals(_ options: Options, hint: String) throws {
+        guard let first = options.positionals.first else { return }
+        throw ParseError("unexpected argument '\(first)' — \(hint)")
+    }
+
+    private static func requireSymbol(_ raw: String) throws -> String {
+        let symbol = raw.trimmingCharacters(in: .whitespaces).uppercased()
+        guard !symbol.isEmpty else { throw ParseError("--ticker cannot be empty") }
+        return symbol
+    }
+
+    /// The currency a new entry is recorded in: `--currency` (known
+    /// code, case-insensitive) overrides the command's own default.
+    private static func entryCurrency(_ options: Options, fallback: Currency) throws -> Currency {
+        guard let raw = options["currency"] else { return fallback }
+        return try parseCurrency(raw, option: "--currency")
+    }
+
+    private static func parseCurrency(_ raw: String, option: String) throws -> Currency {
+        if let exact = Currency(rawValue: raw), exact != .unknown { return exact }
+        if let match = Currency.allCases.first(where: { $0.rawValue.lowercased() == raw.lowercased() }),
+           match != .unknown {
+            return match
+        }
+        throw ParseError("unknown currency '\(raw)' for \(option) — use e.g. CAD, USD, JPY, or GBp")
+    }
+
+    /// Entry fee: zero means "no fee", negative is a usage error.
+    private static func entryFee(_ options: Options) throws -> Decimal? {
+        guard let raw = options["fee"] else { return nil }
+        let value = try parseDecimal(raw, option: "--fee")
+        guard value >= 0 else { throw ParseError("--fee cannot be negative") }
+        return value == 0 ? nil : value
+    }
+
+    /// --rate is a percentage: "4.1" means 4.1 %.
+    private static func parseRate(_ raw: String) throws -> Decimal {
+        let cleaned = raw.hasSuffix("%") ? String(raw.dropLast()) : raw
+        let percent = try parseDecimal(cleaned, option: "--rate")
+        guard percent >= 0, percent <= 1000 else {
+            throw ParseError("--rate must be a percentage between 0 and 1000 (got '\(raw)')")
+        }
+        return percent / 100
+    }
+
+    private static func quoteStamp(_ date: Date?) -> String {
+        guard let date else { return "an unknown time" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     /// Edit *values only*. Kind and account are not editable: those
@@ -902,6 +1209,17 @@ enum Main {
         return ["quote data as of \(formatter.string(from: newest)) — market may be closed, prices may be stale"]
     }
 
+    /// A sale below zero is recorded (the cash is a fact) but the short
+    /// liability it created is outside the model — so it gets stated in
+    /// the summary's footnotes, never quietly omitted from the totals.
+    private static func untrackedShortNotes(_ summary: PortfolioSummary) -> [String] {
+        summary.untrackedShorts.map { flag in
+            "untracked short: \(flag.accountName) sold \(trim(flag.shares)) \(flag.symbol) "
+                + "(\(flag.currency.rawValue)) beyond its holding — cash shows the proceeds, "
+                + "the short itself is not tracked, so totals here are incomplete"
+        }
+    }
+
     /// Destructive-operation gate: `--yes` passes; a terminal prompts
     /// for the literal word "yes"; a non-interactive run refuses.
     private static func confirm(_ message: String, yes: Bool) -> Bool {
@@ -1074,8 +1392,27 @@ enum Main {
               dit tx show <id>                    one transaction, in full
               dit tx deposit  --account A --amount N [options]
               dit tx withdraw --account A --amount N [options]
+              dit tx buy|sell --account A --ticker SYM --shares N
+                              [--price P] [--currency CCY] [--fee F] [--date D]
+              dit tx dividend --account A --ticker SYM --amount N
+                              [--currency CCY] [--fee F] [--date D]
+              dit tx gic --account A --product NAME --principal N --rate PCT
+                         --maturity YYYY-MM-DD [--compounding KIND] [--redeemable]
+              dit tx gic-redeem --account A --gic NAME|ID --proceeds N
+                              [--currency CCY] [--fee F] [--date D]
+              dit tx fx --account A --from CCY --to CCY
+                        --from-amount N --to-amount M [--fee F] [--date D]
               dit tx edit <id> [--date D] [--fee F] [value options]
               dit tx delete <id> [--yes]
+
+              buy/sell without --price fetches the latest quote (a lookup
+              failure aborts; under --offline pass --price instead). A
+              sale bigger than the holding is recorded but flagged.
+              Entry currency defaults to the fetched quote's currency,
+              else the ticker's known trading currency, else the
+              account's — --currency overrides.
+              --gic names the redeemed GIC by product name or id; no
+              match lists the account's live GICs.
 
               Filters: --account A, --kind K, --ticker SYM, --since D,
               --until D, --limit N (most recent N).
@@ -1096,6 +1433,13 @@ enum Main {
                 dit tx list --account "Wells Fargo" --kind sell
                 dit tx deposit --account TD --amount 1000
                 dit tx deposit --account TD --amount 500 --currency USD --date 2026-04-01
+                dit tx buy --account TD --ticker SHOP.TO --shares 10 --price 180
+                dit tx sell --account TD --ticker SHOP.TO --shares 4
+                dit tx dividend --account TD --ticker AAPL --amount 12
+                dit tx gic --account TD --product "5-Year GIC" --principal 10000 \\
+                    --rate 4.1 --maturity 2031-01-09
+                dit tx gic-redeem --account TD --gic "5-Year GIC" --proceeds 10410
+                dit tx fx --account TD --from CAD --to USD --from-amount 1000 --to-amount 740
                 dit tx edit 9F2C6D1A --fee 0 --date 2026-05-05
                 dit tx delete 9F2C6D1A
             """

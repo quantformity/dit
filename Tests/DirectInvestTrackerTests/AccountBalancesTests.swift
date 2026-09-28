@@ -283,3 +283,78 @@ struct AccountBalancesTests {
         #expect(portfolio.account(named: "Wealthsimple US")?.id == usdAccount.id)
     }
 }
+
+// MARK: - Untracked shorts (sales below zero)
+
+private func walletTx(_ dayOffset: Int, _ kind: Transaction.Kind) -> Transaction {
+    Transaction(date: Date(timeIntervalSince1970: TimeInterval(dayOffset * 86_400)),
+                accountID: walletForShorts.id, currency: .cad, kind: kind)
+}
+
+private let walletForShorts = Account(reportingCurrency: .cad, name: "Wallet")
+
+@Test("a sale below zero: cash is booked in full, the short is flagged, not shown as a position")
+func saleBelowZeroIsFlagged() {
+    let history = [
+        walletTx(1, .stockPurchase(StockDetails(ticker: "SHOP.TO", shares: 10, price: 100))),
+        walletTx(2, .stockSale(StockDetails(ticker: "SHOP.TO", shares: 14, price: 100))),
+    ]
+    let b = AccountBalances.compute(account: walletForShorts, transactions: history)
+    #expect(b.positions.isEmpty)
+    #expect(b.cash == 400) // −1000 + 1400: the ledger records what happened
+    #expect(b.untrackedShorts == [UntrackedShort(currency: .cad, symbol: "SHOP.TO", shares: 4)])
+
+    // A within-holding sale is not a short.
+    let flat = AccountBalances.compute(
+        account: walletForShorts,
+        transactions: [walletTx(1, .stockPurchase(StockDetails(ticker: "SHOP.TO", shares: 10, price: 100))),
+                       walletTx(2, .stockSale(StockDetails(ticker: "SHOP.TO", shares: 10, price: 100)))])
+    #expect(flat.untrackedShorts.isEmpty)
+
+    // Excess accumulates across separate below-zero sales.
+    let twice = AccountBalances.compute(
+        account: walletForShorts,
+        transactions: [walletTx(1, .stockSale(StockDetails(ticker: "ENB.TO", shares: 3, price: 40))),
+                       walletTx(2, .stockSale(StockDetails(ticker: "ENB.TO", shares: 2, price: 42)))])
+    #expect(twice.untrackedShorts == [UntrackedShort(currency: .cad, symbol: "ENB.TO", shares: 5)])
+}
+
+@Test("portfolio summary carries untracked shorts with the account attached")
+func summaryFlagsShorts() {
+    let history = [walletTx(1, .stockPurchase(StockDetails(ticker: "SHOP.TO", shares: 10, price: 100))),
+                   walletTx(2, .stockSale(StockDetails(ticker: "SHOP.TO", shares: 14, price: 100)))]
+    let portfolio = Portfolio(accounts: [walletForShorts], transactions: history)
+    let summary = portfolio.summary()
+    #expect(summary.untrackedShorts == [
+        ShortSaleFlag(accountName: "Wallet", symbol: "SHOP.TO", currency: .cad, shares: 4),
+    ])
+}
+
+@Test("a redemption — even a partial one — ends its GIC; cash and realized say so")
+func partialRedemptionEndsGIC() {
+    let purchase = Transaction(
+        date: Date(timeIntervalSince1970: 86_400), accountID: walletForShorts.id, currency: .cad,
+        kind: .gicPurchase(GICDetails(product: "G", principal: 10_000, rate: 0.041,
+                                      compounding: .annual,
+                                      maturityDate: Date(timeIntervalSince1970: 86_400 * 999),
+                                      redeemable: false)))
+    let redeem = Transaction(
+        date: Date(timeIntervalSince1970: 86_400 * 2), accountID: walletForShorts.id, currency: .cad,
+        kind: .gicRedemption(GICRedemptionDetails(purchaseID: purchase.id, proceeds: 2_000)))
+    let b = AccountBalances.compute(account: walletForShorts, transactions: [purchase, redeem])
+    #expect(b.cash == -8_000)          // −10,000 principal + 2,000 back
+    #expect(b.gicValue == 0)          // no live GIC left
+    #expect(b.realizedPnL == -8_000)  // the un-redeemed remainder is booked as lost
+}
+
+@Test("any drained pool going negative warns loudly — and still records")
+func drainedPoolWarns() throws {
+    let deposit = walletTx(1, .deposit(amount: 1_000))
+    let portfolio = Portfolio(accounts: [walletForShorts], transactions: [deposit])
+    let fx = Transaction(
+        date: Date(timeIntervalSince1970: 86_400 * 2), accountID: walletForShorts.id, currency: .usd,
+        kind: .fxConversion(FXDetails(fromCurrency: .cad, fromAmount: 5_000, toAmount: 3_700)))
+    let (updated, notes) = try portfolio.addingTransaction(fx)
+    #expect(updated.transactions.count == 2) // fact recorded, not refused
+    #expect(notes.contains { $0.contains("warning") && $0.contains("CAD cash goes negative") })
+}

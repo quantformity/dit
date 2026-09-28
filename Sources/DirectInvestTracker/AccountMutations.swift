@@ -15,6 +15,7 @@ public enum MutationError: LocalizedError, Equatable {
     case invalidValue(String)
     case kindChange(UUID)
     case danglingRedemption(purchaseID: UUID)
+    case unresolvable(String)
 
     public var errorDescription: String? {
         switch self {
@@ -39,6 +40,8 @@ public enum MutationError: LocalizedError, Equatable {
         case .danglingRedemption(let purchaseID):
             return "a GIC redemption must reference an existing GIC purchase in the same account "
                 + "(id \(purchaseID) matches none)"
+        case .unresolvable(let problem):
+            return problem
         }
     }
 }

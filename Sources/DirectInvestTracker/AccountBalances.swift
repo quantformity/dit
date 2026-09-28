@@ -24,6 +24,24 @@ public struct StockPosition: Hashable, Sendable {
     }
 }
 
+/// A sale that sold more than the account held, aggregated per
+/// `(currency, symbol)`. The cash it moved is booked in full (that is
+/// a fact), but the short position it created is *not tracked* — a
+/// `nil`-valued liability. Listing it keeps the totals honest about
+/// being incomplete instead of quietly pretending the account is flat.
+public struct UntrackedShort: Hashable, Sendable {
+    public let currency: Currency
+    public let symbol: String
+    /// Shares sold beyond the tracked long.
+    public let shares: Decimal
+
+    public init(currency: Currency, symbol: String, shares: Decimal) {
+        self.currency = currency
+        self.symbol = symbol
+        self.shares = shares
+    }
+}
+
 /// A snapshot of what an account holds, computed from its transaction history.
 ///
 /// Everything here is *derived* — nothing is stored with the account:
@@ -48,6 +66,9 @@ public struct StockPosition: Hashable, Sendable {
 ///
 /// Single-currency invariant (exact):
 /// `cash + Σ costBasis + gicValue == deposits − withdrawals + realizedPnL`.
+/// When `untrackedShorts` is non-empty the account sold shares it did
+/// not hold; the cash moved, but the short liability is outside the
+/// model, so aggregate totals are knowingly incomplete there.
 public struct AccountBalances: Hashable, Sendable {
     public let account: Account
 
@@ -77,6 +98,11 @@ public struct AccountBalances: Hashable, Sendable {
     /// Whole-account value in the reporting currency; `nil` if any
     /// component could not be converted.
     public var totalValue: Decimal?
+
+    /// Sales that went below zero — unmodeled short exposure, flagged
+    /// so `totalValue` is never silently incomplete. The single-
+    /// currency invariant holds only when this is empty.
+    public var untrackedShorts: [UntrackedShort] = []
 }
 
 extension AccountBalances {
@@ -107,6 +133,8 @@ extension AccountBalances {
         var activeGICs: [UUID: (currency: Currency, principal: Decimal)] = [:]
         var realized: [Currency: Decimal] = [:]
         var dividends: [Currency: Decimal] = [:]
+        // (currency, symbol) → shares sold beyond the tracked long.
+        var soldBeyondZero: [PositionKey: Decimal] = [:]
 
         for tx in history {
             // Cash: fxConversion is the only kind whose impact spans two currencies.
@@ -139,6 +167,11 @@ extension AccountBalances {
                     costOfSharesSold = 0 // sale with no tracked position
                 }
                 realized[tx.currency, default: 0] += (details.amount - (tx.fee ?? 0)) - costOfSharesSold
+                // Anything sold beyond the tracked long is untracked
+                // short exposure: record that it happened.
+                if details.shares > max(0, current.shares) {
+                    soldBeyondZero[key, default: 0] += details.shares - max(0, current.shares)
+                }
                 held[key] = (
                     shares: max(0, current.shares - details.shares),
                     cost: max(0, current.cost - costOfSharesSold)
@@ -174,6 +207,13 @@ extension AccountBalances {
                     shares: value.shares,
                     averageCostPerShare: value.shares > 0 ? value.cost / value.shares : 0
                 )
+            }
+            .sorted { ($0.currency, $0.symbol) < ($1.currency, $1.symbol) }
+
+        // Untracked shorts, sorted for stable output.
+        let untrackedShorts = soldBeyondZero
+            .map { key, shares in
+                UntrackedShort(currency: key.currency, symbol: key.symbol, shares: shares)
             }
             .sorted { ($0.currency, $0.symbol) < ($1.currency, $1.symbol) }
 
@@ -238,7 +278,8 @@ extension AccountBalances {
             dividends: combined(dividends),
             unrealizedPnLByCurrency: unrealized,
             unrealizedPnL: anyQuoted ? combined(unrealized) : nil,
-            totalValue: totalValue
+            totalValue: totalValue,
+            untrackedShorts: untrackedShorts
         )
     }
 }

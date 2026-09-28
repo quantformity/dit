@@ -50,14 +50,16 @@ extension Portfolio {
             notes.append("registered ticker '\(symbol)' — add a name with 'dit ticker edit' if you like")
         }
 
-        // Withdraw more cash than the account holds? Record the fact,
-        // warn loudly (overdrafts happen; silent negatives do not).
-        if case .withdrawal = tx.kind {
-            var pools = Self.cashPools(of: tx.accountID, in: self)
-            pools[tx.currency, default: 0] += tx.cashImpact
-            if let shortfall = pools[tx.currency], shortfall < 0 {
-                notes.append("warning: cash goes negative (\(Transaction.exact(shortfall)) "
-                    + "\(tx.currency.rawValue)) — check the account actually had this withdrawal")
+        // Spending more cash than the account holds in some currency?
+        // Record the fact, warn loudly (overdrafts happen; silent
+        // negatives do not). Any pool the transaction drains counts —
+        // withdrawals, buys, the outgoing side of an fx conversion.
+        var pools = Self.cashPools(of: tx.accountID, in: self)
+        for (currency, delta) in Self.cashDeltas(of: tx) where delta < 0 {
+            pools[currency, default: 0] += delta
+            if let shortfall = pools[currency], shortfall < 0 {
+                notes.append("warning: \(currency.rawValue) cash goes negative (\(Transaction.exact(shortfall))) "
+                    + "— check the account actually had this money")
             }
         }
 
@@ -243,6 +245,70 @@ extension Portfolio {
             let delta = tx.cashImpact
             return delta == 0 ? [] : [(tx.currency, delta)]
         }
+    }
+
+    // MARK: - Entry helpers
+
+    /// The currency a new record about `symbol` should default to:
+    /// the ticker's confirmed trading currency, else the account's
+    /// reporting currency. A live quote can override this (its own
+    /// currency is the best evidence), but never a guess.
+    public func suggestedCurrency(accountID: UUID, symbol: String?) -> Currency {
+        if let symbol,
+           let ticker = tickers.first(where: { $0.symbol == symbol }),
+           ticker.currency != .unknown {
+            return ticker.currency
+        }
+        return accounts.first { $0.id == accountID }?.reportingCurrency ?? .cad
+    }
+
+    /// Find a GIC purchase in `accountID` by product name (exact,
+    /// case-insensitive), full UUID, or unique UUID prefix — the forms
+    /// a redemption may use to say *which* GIC it redeemed. Ambiguity
+    /// and misses list the account's live GICs instead of guessing.
+    public func findGICPurchase(accountID: UUID, reference raw: String) throws -> Transaction {
+        let query = raw.trimmingCharacters(in: .whitespaces)
+        func gics(_ tx: Transaction) -> Bool {
+            guard tx.accountID == accountID, case .gicPurchase = tx.kind else { return false }
+            return true
+        }
+        let live = transactions.filter(gics)
+
+        // Product name first: only an id-shaped reference that matches
+        // no product may resolve by identifier.
+        let byName = live.filter { tx in
+            if case .gicPurchase(let details) = tx.kind {
+                return details.product.lowercased() == query.lowercased()
+            }
+            return false
+        }
+        if byName.count == 1 { return byName[0] }
+        if byName.count > 1 {
+            throw MutationError.unresolvable(
+                "'\(query)' matches \(byName.count) GICs in that account — refer to one by its "
+                    + "transaction id: \(Self.describe(byName))")
+        }
+
+        let hex = query.replacingOccurrences(of: "-", with: "").uppercased()
+        if hex.count >= 4, hex.allSatisfy(\.isHexDigit) {
+            let byID = live.filter {
+                $0.id.uuidString.replacingOccurrences(of: "-", with: "").uppercased().hasPrefix(hex)
+            }
+            if byID.count == 1 { return byID[0] }
+            if byID.count > 1 {
+                throw MutationError.unresolvable(
+                    "'\(query)' matches \(byID.count) GICs — use a longer id: \(Self.describe(byID))")
+            }
+        }
+        throw MutationError.unresolvable(live.isEmpty
+            ? "no GIC purchase found in that account — record the GIC first ('dit tx gic'), "
+                + "then redeem it"
+            : "no GIC matches '\(query)' — in that account: \(Self.describe(live))")
+    }
+
+    static func describe(_ txs: [Transaction]) -> String {
+        txs.prefix(4).map { "'\($0.summaryLine)' [\(String($0.id.uuidString.prefix(8)))]" }
+            .joined(separator: " | ")
     }
 
     /// "SHOP.TO 100 → 90 shares" style impact for removing a trade.

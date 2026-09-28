@@ -118,6 +118,11 @@ public struct PortfolioSummary: Hashable, Sendable {
     /// when any component could not be converted.
     public let totalValue: Decimal?
 
+    /// Every account's unmodeled short exposure, with the account's
+    /// display name attached — the summary must never present totals
+    /// that quietly ignore a sale below zero.
+    public let untrackedShorts: [ShortSaleFlag]
+
     public init(
         displayCurrency: Currency,
         accounts: [AccountBalances],
@@ -134,7 +139,8 @@ public struct PortfolioSummary: Hashable, Sendable {
         realizedPnL: Decimal?,
         dividends: Decimal?,
         unrealizedPnL: Decimal?,
-        totalValue: Decimal?
+        totalValue: Decimal?,
+        untrackedShorts: [ShortSaleFlag] = []
     ) {
         self.displayCurrency = displayCurrency
         self.accounts = accounts
@@ -152,6 +158,23 @@ public struct PortfolioSummary: Hashable, Sendable {
         self.dividends = dividends
         self.unrealizedPnL = unrealizedPnL
         self.totalValue = totalValue
+        self.untrackedShorts = untrackedShorts
+    }
+}
+
+/// One recorded sale below zero: where it happened and how far below.
+public struct ShortSaleFlag: Hashable, Sendable {
+    public let accountName: String
+    public let symbol: String
+    public let currency: Currency
+    /// Shares sold beyond the tracked long (aggregated per symbol).
+    public let shares: Decimal
+
+    public init(accountName: String, symbol: String, currency: Currency, shares: Decimal) {
+        self.accountName = accountName
+        self.symbol = symbol
+        self.currency = currency
+        self.shares = shares
     }
 }
 
@@ -262,6 +285,18 @@ extension Portfolio {
             left.value != right.value ? left.value > right.value : left.symbol < right.symbol
         }
 
+        // Surface unmodeled short exposure (sales below zero) with the
+        // account attached, sorted for stable output.
+        let untrackedShorts = balances
+            .flatMap { balance -> [ShortSaleFlag] in
+                balance.untrackedShorts.map { short in
+                    ShortSaleFlag(accountName: displayName(of: balance.account),
+                                  symbol: short.symbol, currency: short.currency,
+                                  shares: short.shares)
+                }
+            }
+            .sorted { ($0.accountName, $0.currency, $0.symbol) < ($1.accountName, $1.currency, $1.symbol) }
+
         // --- Per-currency sums (exact) --------------------------------------
         func sum(_ dicts: [[Currency: Decimal]]) -> [Currency: Decimal] {
             var out: [Currency: Decimal] = [:]
@@ -323,7 +358,8 @@ extension Portfolio {
             realizedPnL: toDisplay(realizedPnLByCurrency),
             dividends: toDisplay(dividendsByCurrency),
             unrealizedPnL: anyQuoted ? toDisplay(unrealizedPnLByCurrency) : nil,
-            totalValue: totalValue
+            totalValue: totalValue,
+            untrackedShorts: untrackedShorts
         )
     }
 
