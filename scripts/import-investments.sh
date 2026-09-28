@@ -32,6 +32,8 @@
 #   * 'CAD Business Cash' has two identical 20000 CAD deposits on
 #     2026-04-17 in the source; both are kept (duplicate kept faithfully —
 #     comment one out if it was a source-data bug).
+#   * tx gic records the run date (no --date flag); a post-step right after
+#     the GIC re-dates it to the source's 2025-01-01.
 #
 # TARGET STORE — change if you don't want to import into the default store:
 #   DIT_STORE_URL="$HOME/scratch/dit-import" bash scripts/import-investments.sh
@@ -155,6 +157,9 @@ $DIT tx withdraw --account "CAD Business Cash" --amount 3123.99 --date 2026-09-2
 $DIT tx deposit --account "CAD RESP" --amount 11.57 --date 2025-01-01 --currency CAD
 # maturity 2026-12-31 read from the product name 'GIC 4.45 Dec26'; rate = source yield_rate (0.0445)
 $DIT tx gic --account "CAD RESP" --product "GIC 4.45 Dec26" --principal 5000 --rate 4.45 --maturity 2026-12-31 --currency CAD
+# tx gic has no --date flag (it records the run date); align it to the source date:
+GIC_ID=$(dit tx list --account "CAD RESP" --limit 500 2>/dev/null | awk '/gicPurchase/ {print $1; exit}')
+[ -n "$GIC_ID" ] && dit tx edit "$GIC_ID" --date 2025-01-01
 $DIT tx buy --account "CAD RESP" --ticker MSFT.TO --shares 75 --price 29.9632 --date 2025-01-01 --currency CAD
 $DIT tx buy --account "CAD RESP" --ticker GOOG.NE --shares 100 --price 34.0788 --date 2025-01-01 --currency CAD
 $DIT tx buy --account "CAD RESP" --ticker TSLA.NE --shares 100 --price 22.0762 --date 2025-01-01 --currency CAD
