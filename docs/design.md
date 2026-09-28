@@ -1,7 +1,7 @@
 # DirectInvestTracker — Design & Phase Plan
 
 Status marker: `✅ done · 🔨 implemented, hardening in progress · ⏭ planned`.
-Implementation history lives in `implementation_logs.md`.
+Implementation history lives in `docs/implementation_logs.md`.
 
 ## Product in one paragraph
 

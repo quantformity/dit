@@ -1,7 +1,7 @@
 # Implementation logs
 
 Running log of what was built, what was verified, and what was learned.
-Phase definitions live in `design.md`. Newest entries last.
+Phase definitions live in `docs/design.md`. Newest entries last.
 
 ---
 
@@ -183,7 +183,7 @@ Phase definitions live in `design.md`. Newest entries last.
   commands; `--help` short-circuits before any mutation; `--yes`
   gates destructive ops on non-TTY.
 
-### Final known gaps (out of scope, documented in design.md backlog)
+### Final known gaps (out of scope, documented in the docs/design.md backlog)
 
 - Redis backend, `report`/`reconcile`, `--json` output.
 - Offline mixed-currency summary shows `—` (no invented rates); the
