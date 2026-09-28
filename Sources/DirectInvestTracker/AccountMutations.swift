@@ -12,6 +12,9 @@ public enum MutationError: LocalizedError, Equatable {
     case closedBeforeOpened(UUID, opened: Date, closed: Date)
     case nothingToEdit(UUID)
     case transactionNotFound(UUID)
+    case invalidValue(String)
+    case kindChange(UUID)
+    case danglingRedemption(purchaseID: UUID)
 
     public var errorDescription: String? {
         switch self {
@@ -28,6 +31,14 @@ public enum MutationError: LocalizedError, Equatable {
             return "no changes — every supplied value already matches account \(id)"
         case .transactionNotFound(let id):
             return "no transaction with ID \(id)"
+        case .invalidValue(let problem):
+            return problem
+        case .kindChange:
+            return "a correction may not change what a transaction *is* — "
+                + "delete it and add a corrected one (this keeps the ledger honest about the fix)"
+        case .danglingRedemption(let purchaseID):
+            return "a GIC redemption must reference an existing GIC purchase in the same account "
+                + "(id \(purchaseID) matches none)"
         }
     }
 }

@@ -99,6 +99,11 @@ enum Main {
         let globalValueOptions: Set<String> = ["display", "backend", "store"]
 
         var i = 0
+        // After an option only stage 2 understands (e.g. --kind), bare
+        // tokens are option values or positionals — never a subcommand.
+        // Stage 1-consumed options (--display/--store/--offline…) keep
+        // the command-word stream open: 'dit account --display USD show TD'.
+        var opaqueOptionSeen = false
         while i < argv.count {
             let token = argv[i]
             if token == "-h" || token == "--help" {
@@ -158,11 +163,14 @@ enum Main {
                     i += 1
                     continue
                 }
-                if words.count == 1, groups.contains(words[0]) {
+                if words.count == 1, groups.contains(words[0]), !opaqueOptionSeen {
                     words.append(token)
                     i += 1
                     continue
                 }
+            }
+            if token.hasPrefix("--") && !token.hasPrefix("---") {
+                opaqueOptionSeen = true
             }
             rest.append(token)
             i += 1
@@ -197,9 +205,9 @@ enum Main {
         case ("account", let sub?):
             throw ParseError("unknown account subcommand '\(sub)' — use list, show, add, edit, close, or delete")
         case ("tx", let sub?), ("transaction", let sub?):
-            throw ParseError("'tx \(sub)' is planned for a later release")
+            try await txCommand(sub, invocation.rest, global: global)
         case ("tx", nil), ("transaction", nil):
-            throw ParseError("tx commands are planned for a later release — see 'dit help tx'")
+            try await txCommand("list", invocation.rest, global: global)
         case ("ticker", _):
             throw ParseError("ticker commands are planned for a later release")
         case ("store", _):
@@ -473,6 +481,347 @@ enum Main {
         return (store, portfolio)
     }
 
+    // MARK: - tx commands
+
+    private static func txCommand(_ sub: String, _ args: [String], global: Global) async throws {
+        // 'dit tx 9F2C6D1A' shows that transaction: a run of 8+ hex
+        // characters is a reference, never a subcommand word.
+        if sub.count >= 8, sub.allSatisfy(\.isHexDigit) {
+            try await txShow([sub], global: global)
+            return
+        }
+        switch sub {
+        case "list", "ls":
+            try await txList(args, global: global)
+        case "show":
+            try await txShow(args, global: global)
+        case "deposit":
+            try await txCashEntry(deposit: true, args, global: global)
+        case "withdraw", "withdrawal":
+            try await txCashEntry(deposit: false, args, global: global)
+        case "buy", "sell", "dividend", "gic", "gic-redeem", "fx":
+            throw ParseError("'dit tx \(sub)' arrives in a later release — for now: "
+                + "edit existing records with 'dit tx edit', and the read commands work today")
+        case "edit":
+            try await txEdit(args, global: global)
+        case "delete", "remove":
+            try await txDelete(args, global: global)
+        default:
+            throw ParseError("unknown tx subcommand '\(sub)' — see 'dit help tx'")
+        }
+    }
+
+    private static func txList(_ args: [String], global: Global) async throws {
+        let options = try Options(
+            args,
+            valueOptions: ["account", "kind", "ticker", "since", "until", "limit"])
+        guard options.positionals.isEmpty else {
+            throw ParseError("unexpected argument '\(options.positionals[0])' — "
+                + "filter with --account/--kind/--ticker (or 'dit tx show <id>')")
+        }
+        let (store, configuration) = try openStore(global: global)
+        guard let portfolio = try await store.load() else {
+            print("No portfolio found (store: \(configuration.backend.rawValue) at \(configuration.url.path)).")
+            return
+        }
+        var txs = portfolio.transactions
+        var scope = "all accounts"
+        if let accountRef = options["account"] {
+            let account = try AccountRef(accountRef).resolve(in: portfolio)
+            txs = portfolio.transactions(in: account.id)
+            scope = "'\(account.displayName)'"
+        }
+        if let kind = options["kind"] {
+            guard let target = Self.kindAliases[normalizeToken(kind)] else {
+                throw ParseError("unknown kind '\(kind)' — one of: deposit, withdrawal, buy, sell, "
+                    + "dividend, gic, gic-redeem, fx (or the canonical names)")
+            }
+            txs = txs.filter { $0.kind.kindName == target }
+        }
+        if let ticker = options["ticker"] {
+            let symbol = ticker.trimmingCharacters(in: .whitespaces).uppercased()
+            txs = txs.filter { $0.ticker == symbol }
+        }
+        if let since = options["since"] {
+            let start = try parseDate(since)
+            txs = txs.filter { $0.date >= start }
+        }
+        if let until = options["until"] {
+            let end = try parseDate(until).addingTimeInterval(86_399) // inclusive through that day
+            txs = txs.filter { $0.date <= end }
+        }
+
+        // Deterministic order: date, then storage order for equal dates.
+        var indexed = txs.enumerated().sorted { lhs, rhs in
+            if lhs.element.date != rhs.element.date { return lhs.element.date < rhs.element.date }
+            return lhs.offset < rhs.offset
+        }
+        if let raw = options["limit"] {
+            guard let n = Int(raw), n > 0 else {
+                throw ParseError("--limit needs a positive number (got '\(raw)')")
+            }
+            indexed = Array(indexed.suffix(n)) // keep the most recent
+        }
+
+        print("Transactions — \(scope) (\(indexed.count) shown)")
+        guard !indexed.isEmpty else { return }
+        let rows = indexed.map { entry -> [String] in
+            let tx = entry.element
+            let accountName = portfolio.accounts.first { $0.id == tx.accountID }?.displayName ?? "—"
+            return [String(tx.id.uuidString.prefix(8)), shortDate(tx.date), accountName,
+                    tx.kind.kindName, tx.summaryLine]
+        }
+        for line in Table.render(headers: ["ID", "Date", "Account", "Kind", "Detail"],
+                                 rows: rows, leftColumns: [0, 1, 2, 3, 4]) {
+            print("  \(line)")
+        }
+    }
+
+    private static func txShow(_ args: [String], global: Global) async throws {
+        let options = try Options(args)
+        guard let reference = options.positionals.first else {
+            throw ParseError("usage: dit tx show <id>")
+        }
+        let (store, configuration) = try openStore(global: global)
+        guard let portfolio = try await store.load() else {
+            throw NoPortfolio(path: configuration.url.path)
+        }
+        let tx = try TransactionRef(reference).resolve(in: portfolio)
+        let accountName = portfolio.accounts.first { $0.id == tx.accountID }?.displayName ?? "—"
+        print("Transaction:")
+        print("  ID:        \(tx.id.uuidString)")
+        print("  Date:      \(shortDate(tx.date))")
+        print("  Account:   \(accountName)")
+        print("  Currency:  \(tx.currency.rawValue)")
+        print("  Details:   \(tx.summaryLine)")
+        print("  Fee:       \(tx.fee.map { money($0, tx.currency) } ?? "—")")
+    }
+
+    private static func txCashEntry(deposit: Bool, _ args: [String], global: Global) async throws {
+        let options = try Options(
+            args,
+            valueOptions: ["account", "amount", "currency", "date", "fee"])
+        guard options.positionals.isEmpty else {
+            throw ParseError("unexpected argument '\(options.positionals[0])' — "
+                + "the account goes in --account")
+        }
+        let reference = try options.require("account")
+        let amountRaw = try options.require("amount")
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let account = try AccountRef(reference).resolve(in: portfolio)
+        let amount = try parseDecimal(amountRaw, option: "--amount")
+
+        var currency = account.reportingCurrency
+        if let raw = options["currency"] {
+            guard let parsed = Currency(rawValue: raw), parsed != .unknown else {
+                throw ParseError("unknown currency '\(raw)' — use e.g. CAD, USD, JPY, or GBp")
+            }
+            currency = parsed
+        }
+        var fee: Decimal?
+        if let feeRaw = options["fee"] {
+            let value = try parseDecimal(feeRaw, option: "--fee")
+            fee = value == 0 ? nil : value
+        }
+        let kind: Transaction.Kind = deposit ? .deposit(amount: amount) : .withdrawal(amount: amount)
+        let tx = Transaction(
+            date: try options["date"].map(parseDate) ?? Date(),
+            accountID: account.id,
+            currency: currency,
+            kind: kind,
+            fee: fee)
+        let (updated, notes) = try portfolio.addingTransaction(tx)
+        try await store.save(updated)
+        for note in notes { print(note) }
+        if !deposit, notes.contains(where: { $0.hasPrefix("warning") }) {
+            print("(recorded anyway — the ledger records what happened, not what should fit)")
+        }
+    }
+
+    /// Edit *values only*. Kind and account are not editable: those
+    /// changes describe a different event, which must be a new record
+    /// (delete + re-add), keeping the correction visible.
+    private static func txEdit(_ args: [String], global: Global) async throws {
+        let options = try Options(
+            args,
+            valueOptions: ["date", "fee", "amount", "shares", "price", "principal", "rate",
+                           "maturity", "compounding", "product", "proceeds",
+                           "from-amount", "to-amount"])
+        guard let reference = options.positionals.first else {
+            throw ParseError("usage: dit tx edit <id> [value options] — see 'dit help tx'")
+        }
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let tx = try TransactionRef(reference).resolve(in: portfolio)
+
+        var edits: [TransactionEdit] = []
+        if let raw = options["date"] { edits.append(.date(try parseDate(raw))) }
+        if let raw = options["fee"] {
+            let value = try parseDecimal(raw, option: "--fee")
+            edits.append(.fee(value == 0 ? nil : value))
+        }
+        if let kind = try editedKind(tx: tx, options: options) { edits.append(.kind(kind)) }
+        guard !edits.isEmpty else {
+            throw ParseError("nothing to edit — pass --date, --fee, or a value option "
+                + "valid for kind '\(tx.kind.kindName)'")
+        }
+        let (updated, notes) = try portfolio.editingTransaction(id: tx.id, edits)
+        try await store.save(updated)
+        for note in notes { print(note) }
+    }
+
+    /// Translate value flags into a replacement payload for the *same*
+    /// kind. Any option that does not belong to the kind is an error —
+    /// no silent dropping, no cross-kind guesses.
+    private static func editedKind(tx: Transaction, options: Options) throws -> Transaction.Kind? {
+        func decimal(_ key: String) throws -> Decimal? {
+            guard let raw = options[key] else { return nil }
+            return try parseDecimal(raw, option: "--\(key)")
+        }
+        func used(_ keys: String...) -> Bool { keys.contains { options[$0] != nil } }
+        func rejected(_ keys: [String]) -> ParseError {
+            // Name only the options the user actually passed.
+            let passed = keys.filter { options[$0] != nil }
+            return ParseError("\(passed.map { "--\($0)" }.joined(separator: ", ")) does not apply to "
+                + "'\(tx.kind.kindName)' — edits change values within the same kind only; "
+                + "to record a different event, delete this one and add the right one")
+        }
+
+        switch tx.kind {
+        case .deposit, .withdrawal:
+            if used("shares", "price", "principal", "rate", "maturity", "compounding",
+                    "product", "proceeds", "from-amount", "to-amount") {
+                throw rejected(["shares", "price", "principal", "rate", "maturity",
+                                "compounding", "product", "proceeds", "from-amount", "to-amount"])
+            }
+            guard used("amount") else { return nil }
+            let amount = try decimal("amount")!
+            return tx.kind.kindName == "deposit" ? .deposit(amount: amount) : .withdrawal(amount: amount)
+
+        case .stockPurchase(let details), .stockSale(let details):
+            if used("amount", "principal", "rate", "maturity", "compounding", "product",
+                    "proceeds", "from-amount", "to-amount") {
+                throw rejected(["amount", "principal", "rate", "maturity", "compounding",
+                                "product", "proceeds", "from-amount", "to-amount"])
+            }
+            guard used("shares", "price") else { return nil }
+            let shares = try decimal("shares") ?? details.shares
+            let price = try decimal("price") ?? details.price
+            let replacement = StockDetails(ticker: details.ticker, shares: shares, price: price)
+            return tx.kind.kindName == "stockPurchase" ? .stockPurchase(replacement) : .stockSale(replacement)
+
+        case .dividend(let details):
+            if used("shares", "price", "principal", "rate", "maturity", "compounding",
+                    "product", "proceeds", "from-amount", "to-amount") {
+                throw rejected(["shares", "price", "principal", "rate", "maturity", "compounding",
+                                "product", "proceeds", "from-amount", "to-amount"])
+            }
+            guard used("amount") else { return nil }
+            return .dividend(DividendDetails(ticker: details.ticker, amount: try decimal("amount")!))
+
+        case .gicPurchase(let details):
+            if used("amount", "shares", "price", "proceeds", "from-amount", "to-amount") {
+                throw rejected(["amount", "shares", "price", "proceeds", "from-amount", "to-amount"])
+            }
+            guard used("principal", "rate", "maturity", "compounding", "product") else { return nil }
+            var rate = details.rate
+            if let raw = options["rate"] {
+                // --rate is a percentage: "4.1" means 4.1 %.
+                let cleaned = raw.hasSuffix("%") ? String(raw.dropLast()) : raw
+                let percent = try parseDecimal(cleaned, option: "--rate")
+                guard percent >= 0, percent <= 1000 else {
+                    throw ParseError("--rate must be a percentage between 0 and 1000 (got '\(raw)')")
+                }
+                rate = percent / 100
+            }
+            var compounding = details.compounding
+            if let raw = options["compounding"] {
+                guard let parsed = GICCompounding.allCases
+                    .first(where: { normalizeToken($0.rawValue) == normalizeToken(raw) }) else {
+                    throw ParseError("unknown compounding '\(raw)' — one of: "
+                        + GICCompounding.allCases.map(\.rawValue).joined(separator: ", "))
+                }
+                compounding = parsed
+            }
+            let maturity = try options["maturity"].map(parseDate) ?? details.maturityDate
+            return .gicPurchase(GICDetails(
+                product: options["product"] ?? details.product,
+                principal: try decimal("principal") ?? details.principal,
+                rate: rate,
+                compounding: compounding,
+                maturityDate: maturity,
+                redeemable: details.redeemable))
+
+        case .gicRedemption(let details):
+            if used("amount", "principal", "rate", "from-amount", "to-amount") {
+                throw rejected(["amount", "principal", "rate", "from-amount", "to-amount"])
+            }
+            guard used("proceeds") else { return nil }
+            return .gicRedemption(GICRedemptionDetails(
+                purchaseID: details.purchaseID,
+                proceeds: try decimal("proceeds")!))
+
+        case .fxConversion(let details):
+            if used("amount", "shares", "price", "principal", "rate", "maturity",
+                    "compounding", "product", "proceeds") {
+                throw rejected(["amount", "shares", "price", "principal", "rate", "maturity",
+                                "compounding", "product", "proceeds"])
+            }
+            guard used("from-amount", "to-amount") else { return nil }
+            return .fxConversion(FXDetails(
+                fromCurrency: details.fromCurrency,
+                fromAmount: try decimal("from-amount") ?? details.fromAmount,
+                toAmount: try decimal("to-amount") ?? details.toAmount))
+        }
+    }
+
+    private static func txDelete(_ args: [String], global: Global) async throws {
+        let options = try Options(args, flagOptions: ["yes"])
+        guard let reference = options.positionals.first else {
+            throw ParseError("usage: dit tx delete <id> [--yes]")
+        }
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let tx = try TransactionRef(reference).resolve(in: portfolio)
+        // Compute once: the notes *are* the impact preview.
+        let (updated, notes) = try portfolio.removingTransaction(id: tx.id)
+        let impact = "This will remove '\(shortDate(tx.date)) \(tx.summaryLine)'.\n"
+            + notes.dropFirst().map { "  \($0)" }.joined(separator: "\n")
+        guard confirm(impact, yes: options.flag("yes") == true) else {
+            print("cancelled")
+            return
+        }
+        try await store.save(updated)
+        for note in notes { print(note) }
+    }
+
+    // MARK: - Helpers
+
+    /// Lowercased, dashes/underscores removed — so "gic-redeem",
+    /// "GICRedemption", and "gic_redemption" all match the same thing.
+    private static func normalizeToken(_ raw: String) -> String {
+        raw.lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+    }
+
+    private static let kindAliases: [String: String] = [
+        "deposit": "deposit",
+        "withdraw": "withdrawal", "withdrawal": "withdrawal",
+        "buy": "stockPurchase", "purchase": "stockPurchase", "stockpurchase": "stockPurchase",
+        "sell": "stockSale", "stocksale": "stockSale",
+        "dividend": "dividend",
+        "gic": "gicPurchase", "gicpurchase": "gicPurchase",
+        "gicredeem": "gicRedemption", "gicredemption": "gicRedemption",
+        "fx": "fxConversion", "fxconversion": "fxConversion",
+    ]
+
+    private static func parseDecimal(_ raw: String, option: String) throws -> Decimal {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, let value = Decimal(string: trimmed) else {
+            throw ParseError("invalid number for \(option): '\(raw)'")
+        }
+        return value
+    }
+
     private static func taxableFlag(_ options: Options) throws -> Bool? {
         var answers: [Bool] = []
         if let taxable = options.flag("taxable") { answers.append(taxable) }
@@ -719,8 +1068,36 @@ enum Main {
             """
         case ("tx", _), ("transaction", _):
             return """
-            tx commands (list, show, deposit, withdraw, buy, sell, dividend,
-            gic, gic-redeem, fx, edit, delete) are planned for a later release.
+            USAGE: dit tx <command> [options]
+
+              dit tx list [filters]               transactions (all accounts by default)
+              dit tx show <id>                    one transaction, in full
+              dit tx deposit  --account A --amount N [options]
+              dit tx withdraw --account A --amount N [options]
+              dit tx edit <id> [--date D] [--fee F] [value options]
+              dit tx delete <id> [--yes]
+
+              Filters: --account A, --kind K, --ticker SYM, --since D,
+              --until D, --limit N (most recent N).
+              <id> comes from the ID column of 'dit tx list'; 8 characters
+              usually identify a transaction uniquely.
+
+              --kind values: deposit, withdrawal, buy, sell, dividend, gic,
+              gic-redeem, fx (canonical names like stockPurchase work too).
+
+              Edit rule: values only, within the kind's own fields (a
+              deposit takes --amount; trades --shares/--price; a GIC
+              --principal/--rate/--maturity/--compounding/--product; ...).
+              Changing WHAT a transaction is (kind, account, ticker) is
+              delete + re-add — the correction stays visible in the ledger.
+
+              EXAMPLES
+                dit tx --limit 10
+                dit tx list --account "Wells Fargo" --kind sell
+                dit tx deposit --account TD --amount 1000
+                dit tx deposit --account TD --amount 500 --currency USD --date 2026-04-01
+                dit tx edit 9F2C6D1A --fee 0 --date 2026-05-05
+                dit tx delete 9F2C6D1A
             """
         case ("ticker", _):
             return "ticker commands are planned for a later release."
@@ -740,6 +1117,7 @@ enum Main {
               dit summary [options]      portfolio summary
               dit accounts               list accounts
               dit account <sub> [args]   manage accounts (see: dit account --help)
+              dit tx <sub> [args]        list & manage transactions (see: dit tx --help)
               dit help [command]         help
 
               Global options: --display CCY, --offline, --backend file|sqlite,
