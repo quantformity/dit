@@ -217,8 +217,18 @@ enum Main {
             try await txCommand(sub, invocation.rest, global: global)
         case ("tx", nil), ("transaction", nil):
             try await txCommand("list", invocation.rest, global: global)
-        case ("ticker", _):
-            throw ParseError("ticker commands are planned for a later release")
+        case ("ticker", nil), ("ticker", "list"), ("ticker", "ls"):
+            try await tickerList(global: global)
+        case ("ticker", "show"):
+            try await tickerShow(invocation.rest, global: global)
+        case ("ticker", "add"):
+            try await tickerAdd(invocation.rest, global: global)
+        case ("ticker", "edit"):
+            try await tickerEdit(invocation.rest, global: global)
+        case ("ticker", "delete"), ("ticker", "remove"):
+            try await tickerDelete(invocation.rest, global: global)
+        case ("ticker", let sub?):
+            throw ParseError("unknown ticker subcommand '\(sub)' — use list, show, add, edit, or delete")
         case ("store", _):
             throw ParseError("store commands are planned for a later release — "
                 + "for now configure with --backend/--store (or DIT_BACKEND/DIT_STORE_URL)")
@@ -463,6 +473,146 @@ enum Main {
         let (updated, notes) = try portfolio.removingAccount(id: account.id, force: options.has("force"))
         try await store.save(updated)
         for note in notes { print(note) }
+    }
+
+    // MARK: - ticker commands
+
+    private static func tickerList(global: Global) async throws {
+        let (store, configuration) = try openStore(global: global)
+        guard let portfolio = try await store.load() else {
+            print("No portfolio found (store: \(configuration.backend.rawValue) at \(configuration.url.path)).")
+            return
+        }
+        guard !portfolio.tickers.isEmpty else {
+            print("The ticker registry is empty — 'dit ticker add SYM' registers an instrument.")
+            return
+        }
+        print("Registry:")
+        let rows = portfolio.tickers.sorted { $0.symbol < $1.symbol }.map { entry in
+            [
+                entry.symbol,
+                entry.name ?? "—",
+                entry.currency == .unknown ? "—" : entry.currency.rawValue,
+                entry.tags.isEmpty ? "" : entry.tags.sorted().map(\.displayValue).joined(separator: ", "),
+                "\(portfolio.transactions(for: entry.symbol).count)",
+            ]
+        }
+        for line in Table.render(headers: ["Symbol", "Name", "Ccy", "Tags", "Txns"], rows: rows) {
+            print("  \(line)")
+        }
+    }
+
+    private static func tickerShow(_ args: [String], global: Global) async throws {
+        let options = try Options(args)
+        guard let symbolRaw = options.positionals.first else {
+            throw ParseError("usage: dit ticker show <symbol>")
+        }
+        let symbol = try requireSymbol(symbolRaw)
+        let (store, configuration) = try openStore(global: global)
+        guard let portfolio = try await store.load() else {
+            throw NoPortfolio(path: configuration.url.path)
+        }
+        guard let entry = portfolio[ticker: symbol] else {
+            throw LookupError("no registry entry for '\(symbol)' — 'dit ticker add \(symbol)' creates one")
+        }
+        print("Ticker: \(entry.symbol)")
+        print("  Name:      \(entry.name ?? "—")")
+        print("  Currency:  \(entry.currency == .unknown ? "unknown" : entry.currency.rawValue)")
+        print("  Tags:      \(entry.tags.isEmpty ? "—" : entry.tags.sorted().map(\.displayValue).joined(separator: ", "))")
+        print("  Notes:     \(entry.notes ?? "—")")
+        print("  Referenced by \(portfolio.transactions(for: entry.symbol).count) transaction(s)")
+    }
+
+    private static func tickerAdd(_ args: [String], global: Global) async throws {
+        let options = try Options(
+            args, valueOptions: ["name", "currency", "tags", "notes"])
+        guard options.positionals.count == 1 else {
+            throw ParseError("usage: dit ticker add <symbol> [--name NAME] [--currency CCY] "
+                + "[--tags a,b] [--notes TEXT]")
+        }
+        var currency: Currency
+        if let raw = options["currency"] {
+            currency = try parseCurrency(raw, option: "--currency")
+        } else {
+            currency = .unknown
+        }
+        let entry = EquityTicker(
+            symbol: try requireSymbol(options.positionals[0]),
+            name: options["name"],
+            currency: currency,
+            tags: parseTags(options["tags"]),
+            notes: options["notes"])
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let (updated, notes) = try portfolio.addingTicker(entry)
+        try await store.save(updated)
+        for note in notes { print(note) }
+    }
+
+    private static func tickerEdit(_ args: [String], global: Global) async throws {
+        let options = try Options(
+            args, valueOptions: ["name", "currency", "tags", "notes"])
+        guard let symbolRaw = options.positionals.first else {
+            throw ParseError("usage: dit ticker edit <symbol> [--name NAME] [--currency CCY] "
+                + "[--tags a,b] [--notes TEXT]")
+        }
+        guard let _ = options["name"] ?? options["currency"] ?? options["tags"] ?? options["notes"] else {
+            throw ParseError("nothing to edit — pass --name, --currency, --tags, or --notes")
+        }
+        var currency: Currency?
+        if let raw = options["currency"] {
+            currency = try parseCurrency(raw, option: "--currency")
+        }
+        let tags: Set<Tag>?
+        if options["tags"] != nil {
+            tags = parseTags(options["tags"])
+        } else {
+            tags = nil
+        }
+        let (store, portfolio) = try await requirePortfolio(global: global)
+        let (updated, notes) = try portfolio.updatingTicker(
+            symbol: try requireSymbol(symbolRaw),
+            name: options["name"],
+            currency: currency,
+            tags: tags,
+            notes: options["notes"])
+        try await store.save(updated)
+        for note in notes { print(note) }
+    }
+
+    private static func tickerDelete(_ args: [String], global: Global) async throws {
+        let options = try Options(args, flagOptions: ["yes"])
+        guard let symbolRaw = options.positionals.first else {
+            throw ParseError("usage: dit ticker delete <symbol> [--yes]")
+        }
+        let symbol = try requireSymbol(symbolRaw)
+        let (store, configuration) = try openStore(global: global)
+        guard let portfolio = try await store.load() else {
+            throw NoPortfolio(path: configuration.url.path)
+        }
+        guard portfolio[ticker: symbol] != nil else {
+            throw LookupError("no registry entry for '\(symbol)' — nothing to remove")
+        }
+        let referencing = portfolio.transactions(for: symbol).count
+        if referencing > 0 {
+            let impact = "This will remove the registry entry '\(symbol)'. "
+                + "\(referencing) transaction\(referencing == 1 ? "" : "s") reference it; "
+                + "they are unaffected (the registry is display metadata only)."
+            guard confirm(impact, yes: options.has("yes")) else {
+                print("cancelled")
+                return
+            }
+        }
+        let (updated, notes) = try portfolio.removingTicker(symbol: symbol)
+        try await store.save(updated)
+        for note in notes { print(note) }
+    }
+
+    /// Comma-separated tag list ("dividend, core") → normalized tags.
+    private static func parseTags(_ raw: String?) -> Set<Tag> {
+        guard let raw else { return [] }
+        return Set(raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .map { Tag($0) })
     }
 
     // MARK: - Helpers
@@ -1444,7 +1594,26 @@ enum Main {
                 dit tx delete 9F2C6D1A
             """
         case ("ticker", _):
-            return "ticker commands are planned for a later release."
+            return """
+            USAGE:
+              dit ticker | dit ticker list              list the instrument registry
+              dit ticker add <symbol> [options]         register an instrument
+              dit ticker show <symbol>                  entry details + references
+              dit ticker edit <symbol> [options]        update one entry
+              dit ticker delete <symbol> [--yes]        remove an entry
+
+              Options: --name NAME, --currency CCY (the currency the
+              instrument trades in), --tags a,b, --notes TEXT.
+              The registry is display metadata: trades for a symbol work
+              with or without an entry, and deleting an entry never
+              touches the ledger. Deleting an entry that transactions
+              reference is gated by confirmation.
+
+              EXAMPLES
+                dit ticker add BRK.B --name "Berkshire Hathaway" --currency USD
+                dit ticker edit shop.to --tags "dividend, core"
+                dit ticker list
+            """
         case ("store", _):
             return """
             store commands (path, export, import) are planned for a later

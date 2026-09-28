@@ -15,6 +15,9 @@ public enum MutationError: LocalizedError, Equatable {
     case invalidValue(String)
     case kindChange(UUID)
     case danglingRedemption(purchaseID: UUID)
+    case tickerExists(String)
+    case tickerNotFound(String)
+    case tickerUnchanged(String)
     case unresolvable(String)
 
     public var errorDescription: String? {
@@ -40,6 +43,13 @@ public enum MutationError: LocalizedError, Equatable {
         case .danglingRedemption(let purchaseID):
             return "a GIC redemption must reference an existing GIC purchase in the same account "
                 + "(id \(purchaseID) matches none)"
+        case .tickerExists(let symbol):
+            return "the ticker '\(symbol)' is already registered — "
+                + "update it with 'dit ticker edit \(symbol)'"
+        case .tickerNotFound(let symbol):
+            return "no registry entry for '\(symbol)' — create one with 'dit ticker add \(symbol)'"
+        case .tickerUnchanged(let symbol):
+            return "no changes — every supplied value already matches the entry for '\(symbol)'"
         case .unresolvable(let problem):
             return problem
         }
