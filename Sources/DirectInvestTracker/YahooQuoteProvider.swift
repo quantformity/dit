@@ -179,6 +179,76 @@ public struct YahooQuoteProvider: QuoteProvider {
         cache.upsert(try await rate(from: from, to: to))
     }
 
+    /// Downloads the daily closes between two UTC days (inclusive).
+    ///
+    /// One chart call for the whole range. Missing days (weekends,
+    /// holidays, listing gaps) and non-positive closes are skipped —
+    /// a shorter result is normal, a transport failure throws.
+    public func dailySeries(_ rawSymbol: String, from: Date, to: Date) async throws -> DailySeries {
+        guard let symbol = Self.normalizedSymbol(rawSymbol) else {
+            throw YahooQuoteError.invalidSymbol(rawSymbol)
+        }
+        let p1 = Int(floor(from.timeIntervalSince1970))
+        let p2 = Int(ceil(to.timeIntervalSince1970)) + 86_400 // period2 is end-exclusive; pad one day
+        guard let encoded = symbol.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://query1.finance.yahoo.com/v8/finance/chart/\(encoded)?period1=\(p1)&period2=\(p2)&interval=1d")
+        else {
+            throw YahooQuoteError.invalidSymbol(symbol)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let responsePair: (Data, HTTPURLResponse)
+        do {
+            responsePair = try await fetch(request)
+        } catch let error as YahooQuoteError {
+            throw error
+        } catch {
+            throw YahooQuoteError.network(message: error.localizedDescription)
+        }
+        let (body, response) = responsePair
+        guard (200..<300).contains(response.statusCode) else {
+            throw YahooQuoteError.http(status: response.statusCode)
+        }
+        let document: ChartDocument
+        do {
+            document = try JSONDecoder().decode(ChartDocument.self, from: body)
+        } catch {
+            throw YahooQuoteError.decoding(message: "Chart response is not in the expected shape: \(error.localizedDescription)")
+        }
+        guard let chart = document.chart else {
+            throw YahooQuoteError.decoding(message: "Response has no 'chart' section")
+        }
+        if let apiError = chart.error {
+            throw YahooQuoteError.noData(symbol: symbol, message: apiError.description ?? apiError.code ?? "unknown error")
+        }
+        guard let result = chart.result?.first else {
+            throw YahooQuoteError.noData(symbol: symbol, message: "No chart result in response")
+        }
+
+        let stamps = result.timestamp ?? []
+        let closes = (result.indicators?.quote ?? [])
+            .lazy.compactMap { $0?.close }
+            .first ?? []
+        var byDay: [Date: Decimal] = [:]
+        for (stamp, close) in zip(stamps, closes) {
+            guard let stamp, let close, close.isFinite, close > 0 else { continue }
+            guard let price = Decimal(string: "\(close)") else { continue }
+            // Same-day duplicates (post-market revisions) resolve to the
+            // later entry — same "newer wins" rule as the cache.
+            byDay[DailyPrice.utcDay(Date(timeIntervalSince1970: stamp))] = price
+        }
+        let points = byDay.sorted { $0.key < $1.key }.map { DailyPrice(day: $0.key, price: $0.value) }
+        let code = (result.meta?.currency ?? "").trimmingCharacters(in: .whitespaces).uppercased()
+        return DailySeries(
+            symbol: symbol,
+            currency: code.isEmpty ? .unknown : Currency(rawValue: code) ?? .unknown,
+            points: points
+        )
+    }
+
     // MARK: Transport
 
     fileprivate struct Meta {
@@ -235,6 +305,10 @@ public struct YahooQuoteProvider: QuoteProvider {
     }
 }
 
+// The chart endpoint answers all three needs of the market store: latest
+// price, latest FX rate, and daily closes.
+extension YahooQuoteProvider: PriceDataProvider {}
+
 // MARK: - Lenient response shape
 
 /// The documented-but-undocumented chart API: almost everything is
@@ -275,7 +349,19 @@ private struct ChartDocument: Decodable {
                     )
                 }
             }
+            struct Indicators: Decodable {
+                /// Yahoo nests the series under "quote" → array of
+                /// objects ({close, volume, …}); sometimes null entries
+                /// appear, hence the optionals.
+                let quote: [QuoteData?]?
+            }
+            struct QuoteData: Decodable {
+                let close: [Double?]?
+            }
             let meta: Meta?
+            /// Unix seconds per interval point; nulls mark no-data slots.
+            let timestamp: [Double?]?
+            let indicators: Indicators?
         }
 
         struct APIError: Decodable {

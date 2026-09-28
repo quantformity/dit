@@ -60,6 +60,7 @@ enum Main {
         var display: Currency = .cad
         var backend: String?
         var store: String?
+        var marketStore: String?
         var offline = false
     }
 
@@ -112,8 +113,8 @@ enum Main {
         var global = Global()
         var words: [String] = []
         var rest: [String] = []
-        let groups: Set<String> = ["account", "tx", "transaction", "ticker", "store", "quote", "help"]
-        let globalValueOptions: Set<String> = ["display", "backend", "store"]
+        let groups: Set<String> = ["account", "tx", "transaction", "ticker", "store", "market", "quote", "help"]
+        let globalValueOptions: Set<String> = ["display", "backend", "store", "market-store"]
 
         var i = 0
         // After an option only stage 2 understands (e.g. --kind), bare
@@ -158,6 +159,8 @@ enum Main {
                         global.backend = value
                     case "store":
                         global.store = value
+                    case "market-store":
+                        global.marketStore = value
                     default:
                         break
                     }
@@ -247,6 +250,14 @@ enum Main {
             try await quoteLookup(symbol, invocation.rest, global: global)
         case ("quote", _):
             throw ParseError("usage: dit quote <SYMBOL> [SYMBOL ...] — see 'dit help quote'")
+        case ("market", nil), ("market", "latest"):
+            try await marketLatest(global: global)
+        case ("market", "history"):
+            try await marketHistory(invocation.rest, global: global)
+        case ("market", "show"):
+            try await marketShow(invocation.rest, global: global)
+        case ("market", let sub?):
+            throw ParseError("unknown market subcommand '\(sub)' — use latest, history, or show (see 'dit help market')")
         case ("help", let topic):
             print(helpText(for: Invocation(group: topic ?? "usage", sub: nil, rest: [])))
         default:
@@ -870,6 +881,159 @@ enum Main {
         }
         guard !bySymbol.isEmpty else {
             throw LookupError("no live quotes available for: \(symbols.joined(separator: ", "))")
+        }
+    }
+
+    // MARK: - market commands (the separate market-data store)
+
+    /// The market store + its path, resolved like every other store:
+    /// `--market-store` > `DIT_MARKET_URL` > beside the portfolio store.
+    private static func openMarketStore(global: Global) throws
+        -> (MarketStore, DataStoreFactory.Configuration)
+    {
+        var environment = ProcessInfo.processInfo.environment
+        if let backend = global.backend { environment[DataStoreFactory.backendKey] = backend }
+        if let store = global.store { environment[DataStoreFactory.storeURLKey] = store }
+        if let market = global.marketStore { environment[DataStoreFactory.marketURLKey] = market }
+        let factory = DataStoreFactory(environment: environment)
+        let configuration = try factory.marketConfiguration()
+        return (try factory.makeMarketStore(), configuration)
+    }
+
+    /// Shared guard for the two fetching commands: no portfolio loaded,
+    /// no work. A portfolio without positions is still a quiet success.
+    private static func marketPortfolio(global: Global) async throws -> Portfolio? {
+        let (store, configuration) = try openStore(global: global)
+        guard let portfolio = try await store.load() else {
+            print("No portfolio found (store: \(configuration.backend.rawValue) at \(configuration.url.path)).")
+            print("Nothing to update — add accounts and transactions first.")
+            return nil
+        }
+        return portfolio
+    }
+
+    private static func marketLatest(global: Global) async throws {
+        guard !global.offline else {
+            throw ParseError("'dit market latest' refreshes prices from the provider — "
+                + "--offline refuses the network (offline summaries use cost basis)")
+        }
+        guard let portfolio = try await marketPortfolio(global: global) else { return }
+        let (marketStore, configuration) = try openMarketStore(global: global)
+        let updater = MarketUpdater(provider: YahooQuoteProvider(), store: marketStore)
+        let report = try await updater.updateLatest(portfolio: portfolio,
+                                                    displayCurrency: global.display)
+        print("Latest market data — \(configuration.backend.rawValue) at \(configuration.url.path)")
+        for line in report.lines { print("  \(line)") }
+        for failure in report.failures { printErr("warning: \(failure)") }
+        print("next: 'dit market history' fills daily closes for every held day")
+    }
+
+    private static func marketHistory(_ args: [String], global: Global) async throws {
+        guard !global.offline else {
+            throw ParseError("'dit market history' fetches daily closes — "
+                + "--offline refuses the network")
+        }
+        let options = try Options(args, valueOptions: ["from", "to"], flagOptions: ["all"])
+        guard options.positionals.isEmpty else {
+            throw ParseError("unexpected argument '\(options.positionals[0])' — "
+                + "'dit market history' takes only --all / --from / --to (see 'dit help market')")
+        }
+        if options["from"] != nil || options["to"] != nil {
+            // Parsed for forward compatibility; refuse rather than
+            // silently ignore a window nobody implemented.
+            throw ParseError("--from/--to are not wired yet — history currently spans "
+                + "each symbol's full holding window; use 'dit market history --all' to rebuild it")
+        }
+        guard let portfolio = try await marketPortfolio(global: global) else { return }
+        let (marketStore, configuration) = try openMarketStore(global: global)
+        let updater = MarketUpdater(provider: YahooQuoteProvider(), store: marketStore)
+        let report = try await updater.updateHistory(portfolio: portfolio,
+                                                     displayCurrency: global.display,
+                                                     eraseFirst: options.has("all"))
+        print("Daily history — \(configuration.backend.rawValue) at \(configuration.url.path)")
+        for line in report.lines { print("  \(line)") }
+        for failure in report.failures { printErr("warning: \(failure)") }
+        // Every fetch failing with nothing stored means the network
+        // answer taught us nothing — say so loudly (exit 1).
+        if report.pointsStored == 0, report.seriesFetched > 0,
+           report.failures.count >= report.seriesFetched {
+            throw LookupError("every history fetch failed — check the network and retry")
+        }
+    }
+
+    private static func marketShow(_ args: [String], global: Global) async throws {
+        let options = try Options(args, valueOptions: ["symbol", "days"])
+        guard options.positionals.isEmpty else {
+            throw ParseError("unexpected argument '\(options.positionals[0])' — "
+                + "filter history with --symbol (see 'dit help market')")
+        }
+        let (marketStore, configuration) = try openMarketStore(global: global)
+        let data = try await marketStore.load()
+        let symbolFilter = options["symbol"]?.trimmingCharacters(in: .whitespaces).uppercased()
+        let tailDays: Int?
+        if let raw = options["days"] {
+            guard let value = Int(raw), value > 0 else {
+                throw ParseError("--days needs a positive number (got '\(raw)')")
+            }
+            tailDays = value
+        } else {
+            tailDays = nil
+        }
+
+        var shownSeries = data.series.sorted { $0.key < $1.key }
+        if let symbolFilter, !symbolFilter.isEmpty {
+            shownSeries = shownSeries.filter { $0.key == symbolFilter }
+        }
+
+        print("Market data — \(configuration.backend.rawValue) at \(configuration.url.path)")
+        if data.latestQuotes.isEmpty, data.latestRates.isEmpty, data.series.isEmpty {
+            print("  empty — run 'dit market latest' (current prices) and "
+                + "'dit market history' (daily closes) to fill it")
+            return
+        }
+        print("  updated: \(quoteStamp(data.updatedAt))")
+
+        if !data.latestQuotes.isEmpty || !data.latestRates.isEmpty {
+            print("\nLatest (one per symbol, overwritten by 'dit market latest'):")
+            var rows = data.latestQuotes
+                .sorted { $0.symbol < $1.symbol }
+                .map { quote in
+                    [quote.symbol, trim(quote.price),
+                     quote.currency == .unknown ? "?" : quote.currency.rawValue,
+                     quoteStamp(quote.asOf)]
+                }
+            rows += data.latestRates
+                .sorted { "\($0.base)" < "\($1.base)" }
+                .map { rate in
+                    ["\(rate.base.rawValue)/\(rate.quote.rawValue)", trim(rate.rate),
+                     rate.quote.rawValue, quoteStamp(rate.asOf)]
+                }
+            for line in Table.render(headers: ["Symbol", "Price", "Ccy", "AsOf"], rows: rows) {
+                print("  \(line)")
+            }
+        }
+
+        if !shownSeries.isEmpty {
+            print("\nHistory (\(shownSeries.count) series):")
+            let rows = shownSeries.map { key, series -> [String] in
+                [
+                    key,
+                    series.currency == .unknown ? "?" : series.currency.rawValue,
+                    "\(series.points.count)",
+                    series.points.first.map { shortDate($0.day) } ?? "—",
+                    series.points.last.map { shortDate($0.day) } ?? "—",
+                ]
+            }
+            for line in Table.render(headers: ["Symbol", "Ccy", "Points", "First", "Last"],
+                                     rows: rows, leftColumns: [0, 1, 3, 4]) {
+                print("  \(line)")
+            }
+            if let symbolFilter, let tailDays, let series = data.series[symbolFilter] {
+                print("\n  last \(min(tailDays, series.points.count)) close(s) for \(symbolFilter):")
+                for point in series.points.suffix(tailDays) {
+                    print("    \(shortDate(point.day))  \(trim(point.price))")
+                }
+            }
         }
     }
 
@@ -1809,12 +1973,14 @@ enum Main {
               dit tx <sub> [args]        list & manage transactions (see: dit tx --help)
               dit ticker <sub> [args]    manage the instrument registry (see: dit ticker --help)
               dit store <sub> [args]     path / export / backup / import (see: dit store --help)
+              dit market <sub> [args]     market-data store (see: dit market --help)
               dit quote <SYM> [...]      live price lookup (see: dit quote --help)
               dit help [command]         help
 
               Global options: --display CCY, --offline, --backend file|sqlite,
-              --store PATH, -h/--help. Flags override environment variables.
-              Exit codes: 0 success, 1 runtime error, 2 usage error.
+              --store PATH, --market-store PATH, -h/--help. Flags override
+              environment variables. Exit codes: 0 success, 1 runtime error,
+              2 usage error.
 
               Group help: dit help <group> — e.g. 'dit help account'.
             """
@@ -1991,6 +2157,28 @@ enum Main {
                 dit store backup
                 dit store import ~/Exports/tfsa.json --merge --yes
             """
+        case ("market", _):
+            return """
+            USAGE: dit market <command> [options]
+
+              dit market latest              refresh latest prices + FX
+              dit market history [--all]     fill daily closes (incremental)
+              dit market show [--symbol S] [--days N]   what the store holds
+
+              The market-data store is SEPARATE from the portfolio store:
+              it lives beside it (a 'market' directory or 'market.sqlite'
+              file) and can be moved with --market-store / DIT_MARKET_URL.
+              It never feeds the ledger — transactions stay the source of
+              truth; this is refetchable price data.
+
+              'latest' stores one snapshot per held symbol and needed FX
+              pair (overwritten each run). 'history' stores daily closes
+              for the days each symbol was actually held, fetched only
+              where the store has no data yet — re-running adds just the
+              new end-of-day quotes. --all erases the daily history
+              first and refetches everything (latest snapshots survive).
+              Both need the network; --offline refuses them.
+            """
         case ("quote", _):
             return """
             USAGE: dit quote <SYMBOL> [SYMBOL ...]
@@ -2013,12 +2201,14 @@ enum Main {
               dit tx <sub> [args]        list & manage transactions (see: dit tx --help)
               dit ticker <sub> [args]    manage the instrument registry (see: dit ticker --help)
               dit store <sub> [args]     path / export / backup / import (see: dit store --help)
+              dit market <sub> [args]     market-data store (see: dit market --help)
               dit quote <SYM> [...]      live price lookup (see: dit quote --help)
               dit help [command]         help
 
               Global options: --display CCY, --offline, --backend file|sqlite,
-              --store PATH, -h/--help. Flags override environment variables.
-              Exit codes: 0 success, 1 runtime error, 2 usage error.
+              --store PATH, --market-store PATH, -h/--help. Flags override
+              environment variables. Exit codes: 0 success, 1 runtime
+              error, 2 usage error.
             """
         }
     }

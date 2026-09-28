@@ -31,6 +31,9 @@ public struct DataStoreFactory: Sendable {
     public static let backendKey = "DIT_BACKEND"
     /// Name of the variable giving the store location (directory or file).
     public static let storeURLKey = "DIT_STORE_URL"
+    /// Name of the variable giving the MARKET store location — the
+    /// separate market-data store (see ``marketConfiguration()``).
+    public static let marketURLKey = "DIT_MARKET_URL"
 
     /// Parsed environment configuration.
     public struct Configuration: Equatable, Sendable {
@@ -99,19 +102,93 @@ public struct DataStoreFactory: Sendable {
 
         case .sqlite:
             #if canImport(SQLite3)
-            var dbURL = config.url
-            var existingIsDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: dbURL.path, isDirectory: &existingIsDirectory),
-               existingIsDirectory.boolValue {
-                dbURL.appendPathComponent("portfolio.sqlite", isDirectory: false)
-            }
-            return try SQLiteDataStore(url: dbURL)
+            return try SQLiteDataStore(url: Self.sqliteFile(in: config.url, named: "portfolio.sqlite"))
             #else
             throw DataStoreError.configuration(
                 message: "The sqlite backend requires the SQLite3 module, which is not available on this platform"
             )
             #endif
         }
+    }
+
+    // MARK: Market store
+
+    /// Where the MARKET data lives — a store separate from the
+    /// portfolio, holding prices instead of ledger facts.
+    ///
+    /// Same rules as the portfolio store: `DIT_MARKET_URL` (or the
+    /// `--market-store` flag, injected into that variable by the CLI)
+    /// overrides; otherwise the market store sits *beside* whichever
+    /// portfolio location is configured —
+    ///
+    /// - `file`: a `market` directory next to `portfolio.dat`;
+    /// - `sqlite`: `market.sqlite` beside `portfolio.sqlite`.
+    ///
+    /// Pointing the portfolio store somewhere new therefore isolates
+    /// market data automatically: experiments never touch the real
+    /// quote history, and one backup covers a predictable pair of
+    /// locations.
+    public func marketConfiguration() throws -> Configuration {
+        let portfolio = try configuration()
+        let raw = (environment[Self.marketURLKey] ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !raw.isEmpty {
+            return Configuration(backend: portfolio.backend,
+                                 url: URL(fileURLWithPath: raw, isDirectory: portfolio.backend == .file))
+        }
+        switch portfolio.backend {
+        case .file:
+            return Configuration(backend: .file,
+                                 url: portfolio.url.appendingPathComponent("market", isDirectory: true))
+        case .sqlite:
+            return Configuration(backend: .sqlite,
+                                 url: Self.sqliteDirectory(of: portfolio.url)
+                                     .appendingPathComponent("market.sqlite", isDirectory: false))
+        }
+    }
+
+    /// Construct the market `DataStore` (the backend for `MarketStore`).
+    public func makeMarketDataStore() throws -> any DataStore {
+        let config = try marketConfiguration()
+        switch config.backend {
+        case .file:
+            return try FileDataStore(directory: config.url)
+        case .sqlite:
+            #if canImport(SQLite3)
+            return try SQLiteDataStore(url: Self.sqliteFile(in: config.url, named: "market.sqlite"))
+            #else
+            throw DataStoreError.configuration(
+                message: "The sqlite backend requires the SQLite3 module, which is not available on this platform"
+            )
+            #endif
+        }
+    }
+
+    /// A ready `MarketStore` for the configured market location.
+    public func makeMarketStore() throws -> MarketStore {
+        MarketStore(store: try makeMarketDataStore())
+    }
+
+    /// Interpret `url` as the place holding a SQLite database: if it is
+    /// an existing directory, the named file lives inside it; otherwise
+    /// the URL is the file path itself.
+    private static func sqliteFile(in url: URL, named fileName: String) -> URL {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            return url.appendingPathComponent(fileName, isDirectory: false)
+        }
+        return url
+    }
+
+    /// The directory that should hold sibling SQLite files.
+    private static func sqliteDirectory(of url: URL) -> URL {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return url
+        }
+        if url.pathExtension == "sqlite" { return url.deletingLastPathComponent() }
+        return url
     }
 }
 

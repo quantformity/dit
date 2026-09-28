@@ -42,6 +42,7 @@ missing required field).
 | `--offline` | Never touch the network. Commands that *require* a fresh quote hard-error (pass explicit values instead). |
 | `--backend file\|sqlite` | Backends: portable JSON directory, or libsqlite3 database. |
 | `--store PATH` | Where the store lives. With `file`, a directory; with `sqlite`, a database file (a directory is accepted; `portfolio.sqlite` inside it is used). |
+| `--market-store PATH` | Where the MARKET-data store lives (see `dit market`). Defaults to a `market` directory / `market.sqlite` file beside the portfolio store; env: `DIT_MARKET_URL`. |
 | `-h`, `--help` | Help. `dit --help` (or `dit help`) prints the full command listing; `dit <group> --help` prints one group's commands. Takes precedence over everything in its scope. |
 
 Flags apply to the whole invocation; any order before or after the
@@ -262,6 +263,46 @@ quote; partial misses are listed, not an error.
 ```bash
 dit quote SHOP.TO AAPL
 dit quote BRK.B JPM
+```
+
+## Market data — the quote store
+
+```
+dit market latest                      # refresh latest prices + FX for what you hold
+dit market history [--all]             # fill daily closes (incremental)
+dit market show [--symbol S] [--days N]   # inspect what the market store holds
+```
+
+Price data lives in a store SEPARATE from the ledger — a `market`
+directory (file backend) or `market.sqlite` (sqlite backend) beside the
+portfolio store, movable with `--market-store` / `DIT_MARKET_URL`. The
+market store is a cache of fetched facts, never a source of truth:
+wiping it loses nothing you could not refetch, and no command here
+ever touches the ledger.
+
+- `latest` fetches the current price of every symbol with an OPEN
+  position (plus the FX pairs your display needs) and stores ONE
+  snapshot per symbol, overwritten each run. Prices that stay missing
+  are listed as warnings, not hidden.
+- `history` fills end-of-day closes, but only for the days each
+  symbol was actually held (derived from your transactions — a symbol
+  sold in May fetches nothing after May), and only where the store
+  has no data yet. Re-running adds just the new closes; failed
+  fetches are reported. `--all` erases the daily history first and
+  refetches everything (latest snapshots survive).
+- `show` reads the store offline: latest table, per-series coverage,
+  and `--symbol S --days N` prints the last N closes of one series.
+
+All market commands need the network (except `show`); `--offline`
+refuses them. The store is currently written-only — `dit summary`
+still fetches live quotes; reading valuation from the store
+(`--as-of`, offline-valued summaries) is the designed follow-up.
+
+```bash
+dit market latest
+dit market history
+dit market history --all
+dit market show --symbol RBLX --days 10
 ```
 
 ## A realistic walkthrough

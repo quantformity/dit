@@ -188,3 +188,43 @@ Phase definitions live in `docs/design.md`. Newest entries last.
 - Redis backend, `report`/`reconcile`, `--json` output.
 - Offline mixed-currency summary shows `—` (no invented rates); the
   account table could hint why.
+
+## Phase 8 — market-data store & update commands (2026-09-28)
+
+### What was built
+
+- **Second store, same cascade**: `MarketStore` (middle layer above the
+  existing `DataStore` protocol) persists ONE atomic `market` document —
+  latest snapshots + per-asset daily series — in its OWN backend:
+  a `market/` directory or `market.sqlite` beside the portfolio store,
+  relocatable via `--market-store` / `DIT_MARKET_URL`. Prices never
+  enter the portfolio document; wiping quotes cannot touch the ledger.
+- **`dit market latest`**: fetches current prices for symbols with open
+  positions only (reuse of `marketDataPlan`) plus needed FX pairs; the
+  store keeps one latest snapshot per symbol, overwritten per run.
+- **`dit market history [--all]`**: daily closes fetched per (symbol,
+  day-that-symbol-was-held) — holding windows derived by replaying the
+  ledger, merged across accounts. Incremental by default: each series
+  carries a coverage watermark, requests start strictly after it, and
+  a successful fetch advances it (holidays never refetch). `--all`
+  wipes the series first.
+- New files: `MarketStore.swift`, `MarketUpdate.swift` (windows,
+  updater, injected `PriceDataProvider` + Yahoo daily-series fetch),
+  14 tests incl. a stub provider that asserts *which ranges were ever
+  fetched*; scenario suite unchanged at 79/79.
+
+### Errors found and fixed during testing (before any live run)
+
+- A "weekday coverage" incrementality test would have refetched every
+  holiday forever; replaced by the watermark rule.
+- Window merging assumed chronological arrival — broken by cross-account
+  ordering; now sort-then-merge.
+- FX window initially keyed on the quote currency (found via a failing
+  test that expected `USDCAD=X` fetches).
+
+### Known data quirks found on the real portfolio
+
+- Yahoo has no daily series for NEO tickers (`TSLA.NE` &co → one point
+  only; latest prices DO work). A ticker-alias or NEO source is the
+  follow-up if the 3.9%-of-portfolio NEO positions matter historically.
+- Live store filled 2026-09-28: 19 series, ~6,900 daily points in ~1.5 s.

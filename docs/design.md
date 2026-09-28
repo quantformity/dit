@@ -56,6 +56,11 @@ Sources/DirectInvestTracker/
   MarketQuote/ExchangeRate/
   MarketDataCache/MarketDataPlan
   QuoteProvider/YahooQuoteProvider   on-demand quotes, freshness rules
+  MarketStore                        SEPARATE persisted market-data document
+                                     (latest snapshots + daily series with a
+                                     coverage watermark)
+  MarketUpdate                       holding-window derivation + incremental
+                                     market-store updater (injected provider)
   DataStore/FileDataStore/
   SQLiteDataStore/PortfolioStore/
   DataStoreFactory              backend-agnostic persistence; factory is the
@@ -72,6 +77,16 @@ Sources/DirectInvestTracker/
 - Multi-currency cash: an account has a **cash pool per currency**; an fx
   conversion touches two pools; totals that cannot be converted display
   `—` instead of inventing a rate.
+- Market data is a SECOND store, never inside the portfolio document:
+  the ledger's one-atomic-save rule stays scoped to ledger facts, and
+  price history can grow, wipe, or restore without touching it. It
+  defaults to beside the portfolio store (`market` dir / `market.sqlite`),
+  follows the same backend choice, and is relocatable
+  (`--market-store`/`DIT_MARKET_URL`). Two sections: latest snapshots
+  (one per symbol, overwritten) and daily series. A series stores a
+  **coverage watermark** so "fetch only what is missing" stays true
+  over holidays and no-data days; history ranges come from replaying
+  the ledger (a symbol is priced only on days it was held).
 
 ## Command surface (target v1)
 

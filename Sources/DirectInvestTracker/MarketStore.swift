@@ -1,0 +1,232 @@
+import Foundation
+
+// MARK: - Stored market data
+
+/// One end-of-day price observation, keyed by UTC calendar day.
+public struct DailyPrice: Codable, Hashable, Sendable {
+    /// The trading day, normalized to UTC midnight. Normalization is
+    /// what lets "already have 2026-05-01" work across providers whose
+    /// timestamps carry exchange-local times.
+    public var day: Date
+    /// Close (last) price for the day, in the series currency.
+    public var price: Decimal
+
+    public init(day: Date, price: Decimal) {
+        self.day = DailyPrice.utcDay(day)
+        self.price = price
+    }
+
+    /// The UTC-midnight calendar day containing `date`.
+    public static func utcDay(_ date: Date) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.startOfDay(for: date)
+    }
+}
+
+/// The stored daily history for one asset (an equity symbol or an FX
+/// pair). Points are kept sorted ascending by day with no duplicate
+/// days, so a merge is cheap and the "keep only what is missing" rule
+/// is a set membership test.
+public struct PriceSeries: Codable, Hashable, Sendable {
+    /// Equity symbol ("RBLX") or FX pair ("USD/CAD").
+    public var symbol: String
+    /// The currency the prices are denominated in (for FX pairs: the
+    /// quote currency — USD/CAD prices CAD per 1 USD).
+    public var currency: Currency
+    /// Ascending, day-unique.
+    public var points: [DailyPrice]
+    /// The date through which a successful fetch has already verified
+    /// this series ("everything up to here was asked for; what exists,
+    /// exists"). This is what makes repeated updates cheap: holidays
+    /// and no-data days sit behind the watermark instead of being
+    /// re-requested forever, while genuinely new days do not.
+    public var coveredThrough: Date?
+
+    public init(symbol: String, currency: Currency, points: [DailyPrice] = [],
+                coveredThrough: Date? = nil) {
+        self.symbol = symbol
+        self.currency = currency
+        self.points = PriceSeries.normalized(points)
+        self.coveredThrough = coveredThrough
+    }
+
+    /// Lenient decoding with defaults, so a stored series from before
+    /// the watermark existed (or with a missing field) still loads.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.symbol = try container.decode(String.self, forKey: .symbol)
+        self.currency = (try container.decodeIfPresent(Currency.self, forKey: .currency)) ?? .unknown
+        self.points = (try container.decodeIfPresent([DailyPrice].self, forKey: .points)) ?? []
+        self.coveredThrough = try? container.decodeIfPresent(Date.self, forKey: .coveredThrough)
+    }
+
+    /// Sort + de-duplicate by day; the *last* observation for a day wins
+    /// (provider order, matching `MarketDataCache`'s "newer wins" rule).
+    public static func normalized(_ points: [DailyPrice]) -> [DailyPrice] {
+        var byDay: [Date: Decimal] = [:]
+        for point in points { byDay[DailyPrice.utcDay(point.day)] = point.price }
+        return byDay.sorted { $0.key < $1.key }.map { DailyPrice(day: $0.key, price: $0.value) }
+    }
+
+    /// Adds only the days the series does not already hold; stored days
+    /// keep their existing value (incremental update rule). Returns the
+    /// merged series and how many days were added.
+    public func merging(_ new: [DailyPrice]) -> (series: PriceSeries, added: Int) {
+        let stored = Set(points.map(\.day))
+        var additions: [DailyPrice] = []
+        for point in new {
+            let day = DailyPrice.utcDay(point.day)
+            if !stored.contains(day) { additions.append(DailyPrice(day: day, price: point.price)) }
+        }
+        guard !additions.isEmpty else { return (self, 0) }
+        var merged = PriceSeries(symbol: symbol, currency: currency, points: points + additions)
+        merged.coveredThrough = coveredThrough
+        return (merged, additions.count)
+    }
+
+    /// The newest stored day, if any.
+    public var latestDay: Date? { points.last?.day }
+}
+
+/// The whole market-data document — the market store's unit of
+/// persistence, mirroring how `Portfolio` is the portfolio store's.
+///
+/// Two independent sections:
+/// - `latestQuotes`/`latestRates`: at most one snapshot per symbol/pair,
+///   overwritten by `dit market latest` ("keep only the latest");
+/// - `series`: the daily history filled by `dit market history`.
+public struct MarketData: Codable, Hashable, Sendable {
+    public var updatedAt: Date?
+    public var latestQuotes: [MarketQuote]
+    public var latestRates: [ExchangeRate]
+    /// Keyed by symbol/pair (same key as inside `MarketQuote`/series).
+    public var series: [String: PriceSeries]
+
+    public init(
+        updatedAt: Date? = nil,
+        latestQuotes: [MarketQuote] = [],
+        latestRates: [ExchangeRate] = [],
+        series: [String: PriceSeries] = [:]
+    ) {
+        self.updatedAt = updatedAt
+        self.latestQuotes = latestQuotes
+        self.latestRates = latestRates
+        self.series = series
+    }
+
+    /// Lenient decoding: every section may be missing (decode as empty),
+    /// and one broken entry must not poison the whole document — entries
+    /// that fail to decode are dropped, not fatal. Stored data is a
+    /// refetchable cache; degrading beats refusing to start.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.updatedAt = try? container.decodeIfPresent(Date.self, forKey: .updatedAt)
+        self.latestQuotes = (try? container.decodeIfPresent([MarketQuote].self, forKey: .latestQuotes)) ?? []
+        self.latestRates = (try? container.decodeIfPresent([ExchangeRate].self, forKey: .latestRates)) ?? []
+        self.series = (try? container.decodeIfPresent([String: PriceSeries].self, forKey: .series)) ?? [:]
+    }
+
+    // MARK: Section helpers
+
+    /// Replaces (or inserts) the one "latest" snapshot for the quote's
+    /// symbol — the latest section holds at most one entry per symbol.
+    public mutating func replaceLatest(_ quote: MarketQuote) {
+        latestQuotes.removeAll { $0.symbol == quote.symbol }
+        latestQuotes.append(quote)
+    }
+
+    /// Replaces (or inserts) the one "latest" snapshot for a currency pair.
+    public mutating func replaceLatest(_ rate: ExchangeRate) {
+        latestRates.removeAll { $0.base == rate.base && $0.quote == rate.quote }
+        latestRates.append(rate)
+    }
+
+    /// Mends the per-day series for `symbol`, adding only days not
+    /// already stored, and advances the coverage watermark to `through`
+    /// when given (a successful fetch verifies everything up to there,
+    /// even if the provider had no new data). Returns days added.
+    @discardableResult
+    public mutating func mergeSeries(symbol: String, currency: Currency,
+                                     points: [DailyPrice], through: Date? = nil) -> Int {
+        let existing = series[symbol] ?? PriceSeries(symbol: symbol, currency: currency)
+        var (merged, added) = existing.merging(points)
+        if let through, merged.coveredThrough == nil || through > merged.coveredThrough! {
+            merged.coveredThrough = through
+        }
+        series[symbol] = merged
+        return added
+    }
+
+    /// Removes every daily series, keeping the latest snapshots.
+    /// This is what `dit market history --all` does before refetching.
+    public mutating func eraseSeries() {
+        series.removeAll()
+    }
+
+    /// The lookup path a future `--as-of` valuation uses: the newest
+    /// stored observation on or before `day`.
+    public func price(onOrBefore day: Date, for symbol: String) -> Decimal? {
+        guard let series = series[symbol], !series.points.isEmpty else { return nil }
+        let day = DailyPrice.utcDay(day)
+        return series.points.last { $0.day <= day }?.price
+    }
+}
+
+// MARK: - Store
+
+/// Backend-agnostic access to the persisted market data.
+///
+/// The middle layer above `DataStore`, exactly like `PortfolioStore`
+/// above the portfolio document — one document key, load/save/erase,
+/// backend invisible. The market document lives in its OWN backend
+/// (its own directory or database file, separate from the portfolio
+/// document) so price history can grow, be wiped, or be restored
+/// without ever touching the ledger.
+public struct MarketStore: Sendable {
+    /// The storage key under which the market document is kept inside
+    /// its backend.
+    public static let documentKey = "market"
+
+    private let store: any DataStore
+
+    /// - Parameter store: the backend for the MARKET document — pass a
+    ///   backend pointed at the market location, never the portfolio one.
+    public init(store: some DataStore) {
+        self.store = store
+    }
+
+    /// The stored market data. A missing or corrupt document decodes to
+    /// an empty one: the market store is a cache, and an unreadable
+    /// cache is refilled, not fatal.
+    public func load() async throws -> MarketData {
+        guard let payload = try await store.load(key: Self.documentKey) else { return MarketData() }
+        if let decoded = try? JSONDecoder().decode(MarketData.self, from: payload) {
+            return decoded
+        }
+        return MarketData()
+    }
+
+    /// Replace the whole market document atomically.
+    public func save(_ data: MarketData) async throws {
+        let payload: Data
+        do {
+            payload = try JSONEncoder().encode(data)
+        } catch {
+            throw DataStoreError.encodeFailed(key: Self.documentKey, message: error.localizedDescription)
+        }
+        try await store.save(payload, key: Self.documentKey)
+    }
+
+    /// Remove the whole market document (diagnostics; `--all` history
+    /// refresh goes through `MarketData.eraseSeries` + `save` instead,
+    /// so the latest snapshots survive).
+    public func delete() async throws {
+        try await store.delete(key: Self.documentKey)
+    }
+
+    /// All keys in the market backend (passthrough for `dit store path`).
+    public func keys() async throws -> [String] {
+        try await store.keys()
+    }
+}
