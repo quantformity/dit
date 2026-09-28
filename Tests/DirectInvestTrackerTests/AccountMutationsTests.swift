@@ -131,3 +131,25 @@ func removeUnknownAccount() throws {
         _ = try Portfolio().removingAccount(id: missing, force: true)
     }
 }
+
+// MARK: - name uniqueness (the CLI resolves accounts by name)
+
+@Test("adding an account with an existing name is refused")
+func addDuplicateName() throws {
+    let existing = Account(name: "TFSA")
+    let duplicate = Account(name: "  tfsa ")
+    #expect(throws: MutationError.accountAlreadyNamed("tfsa")) {
+        _ = try Portfolio(accounts: [existing]).addingAccount(duplicate)
+    }
+    // Unnamed accounts stay allowed (they resolve by ID, not name).
+    _ = try Portfolio(accounts: [existing]).addingAccount(Account(institution: "X"))
+}
+
+@Test("renaming onto another account's name is refused")
+func renameCollision() throws {
+    let a = Account(name: "Alpha")
+    let b = Account(name: "Beta")
+    #expect(throws: MutationError.accountAlreadyNamed("ALPHA")) {
+        _ = try Portfolio(accounts: [a, b]).updatingAccount(id: b.id, name: "ALPHA")
+    }
+}

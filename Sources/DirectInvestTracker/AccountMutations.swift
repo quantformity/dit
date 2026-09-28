@@ -7,6 +7,7 @@ import Foundation
 /// these when the operation cannot be applied.
 public enum MutationError: LocalizedError, Equatable {
     case accountExists(UUID)
+    case accountAlreadyNamed(String)
     case accountNotFound(UUID)
     case accountHasTransactions(UUID, count: Int)
     case closedBeforeOpened(UUID, opened: Date, closed: Date)
@@ -27,6 +28,8 @@ public enum MutationError: LocalizedError, Equatable {
         switch self {
         case .accountExists(let id):
             return "an account with ID \(id) already exists"
+        case .accountAlreadyNamed(let name):
+            return "an account is already named '\(name)' — accounts need distinct names so the CLI can resolve them unambiguously (rename one with 'dit account edit', or use a new name)"
         case .accountNotFound(let id):
             return "no account with ID \(id)"
         case .accountHasTransactions(let id, let count):
@@ -87,6 +90,15 @@ extension Portfolio {
     public func addingAccount(_ account: Account) throws -> (Portfolio, [String]) {
         guard !accounts.contains(where: { $0.id == account.id }) else {
             throw MutationError.accountExists(account.id)
+        }
+        let newName = account.name?.trimmingCharacters(in: .whitespaces)
+        if let name = newName, !name.isEmpty {
+            let key = name.lowercased()
+            guard !accounts.contains(where: {
+                ($0.name ?? "").trimmingCharacters(in: .whitespaces).lowercased() == key
+            }) else {
+                throw MutationError.accountAlreadyNamed(name)
+            }
         }
         var copy = self
         copy.accounts.append(account)
@@ -153,6 +165,17 @@ extension Portfolio {
         if let openedDate = account.openedDate, let closedDate = account.closedDate,
            closedDate < openedDate {
             throw MutationError.closedBeforeOpened(id, opened: openedDate, closed: closedDate)
+        }
+        // Renaming must not collide with another account's name: two
+        // same-named accounts make every name-based command ambiguous.
+        if let newName = account.name?.trimmingCharacters(in: .whitespaces), !newName.isEmpty {
+            let key = newName.lowercased()
+            guard !accounts.contains(where: {
+                $0.id != id
+                    && ($0.name ?? "").trimmingCharacters(in: .whitespaces).lowercased() == key
+            }) else {
+                throw MutationError.accountAlreadyNamed(newName)
+            }
         }
 
         var copy = self

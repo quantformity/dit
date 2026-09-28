@@ -94,33 +94,97 @@ Phase definitions live in `design.md`. Newest entries last.
   a thin shell over library logic).
 - Product outputs land in `.build/out/Products/Debug`.
 
-## Current state (start of Phase 7)
+## Phase 5 — Ticker registry (commit `efb5de2`)
 
-- Phases 1–4 implemented and smoke-verified; latest commit `d6daa32`.
-- `ticker`/`store`/`quote` groups parse but respond "planned for a
-  later release" (usage error), by design.
-- Scratch fixtures: `/tmp/dit-demo` (pristine), `/tmp/dit-p3|p4|p4b|p4c`
-  (smoke-scarred), installed CLI at `/opt/homebrew/bin/dit`.
+- `Portfolio` mutations: `addingTicker`, `updatingTicker`, `removingTicker`
+  (new error cases: `tickerExists`, `tickerNotFound`, `tickerUnchanged`).
+  Removal is ledger-safe: transactions keep the symbol text, so a
+  referenced entry warns but stays deletable.
+- CLI `dit ticker list/show/add/edit/delete(--yes)`, `--tags` parsing,
+  9 new XCTest cases; smoke-verified add → collision → edit → unchanged
+  rejection → tags clear → delete gate.
 
-### Known gaps to close in Phase 7 (scenario phase)
+## Phase 6 — store / quote / polish (commit `8a9bf93`)
 
-1. **Bootstrap gap (verified, unfixed)**: `dit account add` on an
-   *empty* store exits 1 ("no portfolio found") — a brand-new user
-   cannot start. Mutation commands on an empty store must bootstrap an
-   empty portfolio (writes stay atomic; reads stay friendly).
-2. Currency parsing: entry commands accept lowercase (`cad`), but
-   `deposit/withdraw --currency` is strict — unify (case-insensitive,
-   reject `.unknown`).
-3. Summary of a mixed-currency account shows `—` for Cash/Total in
-   `--offline` mode (correct by the no-invented-rate rule, but the
-   account table should hint why).
-4. No end-to-end scenario harness yet — Phase 7's `scripts/scenario-e2e.sh`
-   will assert the full "from nothing → multi-account, cross-currency,
-   edit/delete, edge-facts" story against the installed binary.
+### Library
 
-### Next
+- `Portfolio.importing(_:mode:)` (StoreMutations.swift): single-account
+  replace vs merge; validation: no account, >1 account, dangling accountID
+  (all new `MutationError` cases); tickers upsert — existing registry
+  entries are never overwritten by a file. 8 new tests.
+- `PortfolioStore.keys()` passthrough in the middle layer.
+- **Account name uniqueness** (found by the Phase 7 scenario, fixed in
+  Phase 7): `addingAccount` and `updatingAccount(name:)` now refuse
+  case-insensitive name collisions (`.accountAlreadyNamed`) — two
+  same-named accounts made every name-based command ambiguous. 2 new
+  tests.
 
-- Phase 7: bootstrap fix + scenario script + run + verify (this phase's
-  deliverable is a *green scripted run*, not new commands).
-- Phase 5 (`dit ticker`) and Phase 6 (`dit store`, `dit quote`, polish)
-  after it.
+### CLI `dit store`
+
+- `path` (backend, location, document shape, keys), `export [--to] [--account]`
+  (full or single-account JSON — the import format), `backup [--to DIR]`
+  (timestamped copy of the file dir, or sqlite + wal/shm),
+  `import FILE [--merge] [--force] [--yes]`: replace is the default and
+  auto-backs up first (`--force` skips); merge dedups transactions by
+  UUID and upserts tickers; malformed or multi-account files are refused
+  before the store is touched; non-TTY replace requires `--yes`.
+
+### CLI `dit quote SYM...`
+
+- Live Yahoo table (symbol, price, ccy, as-of, source) via
+  `YahooQuoteProvider`; partial misses are listed, exit non-zero only
+  when nothing resolved; `--offline` refused (usage error) because the
+  command *is* the fetch. Verified live: `AAPL 341.07 USD`.
+
+### Polish
+
+- `parseCurrency` unified for `--display`, `account add/edit`,
+  `tx cash entries` (case-insensitive, `.unknown` rejected).
+- `resolveAccount` wrapper: every account-ref failure now carries a
+  did-you-mean hint (11 call sites), backed by a lightweight
+  `didYouMean` (ci exact / substring / 2-char prefix).
+- Soft, non-blocking hint when trade/dividend tickers are not in the
+  registry (they still auto-register on first sight, as before).
+- `store` + `quote` help sections written; `dit help` lists both groups.
+- **Bootstrap fix (Phase 7's first item, done early)**: mutations on an
+  empty store now bootstrap `Portfolio()` instead of erroring — `account
+  add` works from nothing. Reads keep the friendly empty display.
+
+### Phase 6 gotchas
+
+- `FileManager.removeItem` on a non-existent path throws — guard with
+  `fileExists` before deleting stale same-second backup targets.
+- `store backup --to` for the file backend: the destination dir is
+  created explicitly (the store dir itself is not the `--to` dir).
+- Two `// MARK: - Helpers` occurrences in main.swift — anchor edits with
+  surrounding context, never a bare MARK line.
+
+## Phase 7 — Scenario / emulation (this commit)
+
+- `scripts/scenario-e2e.sh`: 79 assertions playing one coherent user
+  story against a fresh store — bootstrap from nothing, two accounts,
+  registry, deposits, **overdraft recorded-with-warning** (exit 0),
+  trades with explicit prices, **oversell recorded as a SHORT warning**,
+  dividends (auto-register + near-miss), GIC buy + **partial redemption
+  flagged** (all-or-nothing model), FX conversion, edit/correct
+  (value-field yes, kind change no → usage error), ticker + account
+  maintenance (referenced-ticker delete gate, rename-collision refusal,
+  delete-with-ledger refused), offline summary / `--display`, store
+  export → import (replace/merge/dedup/non-TTY gate) → backup, sqlite
+  backend round trip, and the exit-code contract (0 success, 1 runtime,
+  2 usage).
+- Running the scenario found and fixed the account name-uniqueness gap
+  (above) — the duplicate `account add` made every later command
+  ambiguous; exactly the class of regression an E2E story should catch.
+- One expectation corrected after observation: `--offline` + missing
+  `--price` is a *flag contradiction* → usage error (exit 2), not a
+  runtime failure.
+- Exit codes verified end-to-end: 0 / 1 / 2 all land on the right
+  commands; `--help` short-circuits before any mutation; `--yes`
+  gates destructive ops on non-TTY.
+
+### Final known gaps (out of scope, documented in design.md backlog)
+
+- Redis backend, `report`/`reconcile`, `--json` output.
+- Offline mixed-currency summary shows `—` (no invented rates); the
+  account table could hint why.
