@@ -57,6 +57,9 @@ public struct UntrackedShort: Hashable, Sendable {
 ///   realized P&L)
 /// - `unrealizedPnLByCurrency` / `unrealizedPnL` — `(lastPrice − averageCost) × shares`,
 ///   computed only for positions that received a quote
+/// - `dayChangeByCurrency` / `dayChange` — `(quote − previousClose) × shares`,
+///   computed only for positions whose quote pairs with an earlier stored
+///   close (see ``DayPricePair``)
 /// - `totalValue` — cash + position value (quote when given, else cost basis)
 ///   + live GIC principal, in the reporting currency
 ///
@@ -95,6 +98,14 @@ public struct AccountBalances: Hashable, Sendable {
     /// `nil` when no position received a quote.
     public var unrealizedPnL: Decimal?
 
+    /// One-day P&L per currency (native amounts, exact): each quoted
+    /// position's value change against that ticker's previous available
+    /// close. `[:]` when no position has both a quote and a prior close.
+    public var dayChangeByCurrency: [Currency: Decimal] = [:]
+    /// The same changes in the reporting currency; `nil` when there is
+    /// no daily data or a component could not be converted.
+    public var dayChange: Decimal? = nil
+
     /// Whole-account value in the reporting currency; `nil` if any
     /// component could not be converted.
     public var totalValue: Decimal?
@@ -117,11 +128,17 @@ extension AccountBalances {
     ///   - lastPrice: optional provider `lastPrice(currency, symbol)`.
     ///     Unquoted positions fall back to cost basis in `totalValue` and
     ///     are excluded from `unrealizedPnL`.
+    ///   - dayPrices: optional provider `dayPrices(currency, symbol)`
+    ///     pairing the valuation price with the ticker's previous close.
+    ///     A pair is used only when its `current` equals the quote the
+    ///     position was actually valued at — a day change must describe
+    ///     the number displayed, never a different observation.
     public static func compute(
         account: Account,
         transactions: [Transaction],
         rate: ((Currency, Currency) -> Decimal?)? = nil,
-        lastPrice: ((Currency, String) -> Decimal?)? = nil
+        lastPrice: ((Currency, String) -> Decimal?)? = nil,
+        dayPrices: ((Currency, String) -> DayPricePair?)? = nil
     ) -> AccountBalances {
         let reporting = account.reportingCurrency
         let history = transactions.sorted { $0.date < $1.date }
@@ -227,12 +244,21 @@ extension AccountBalances {
         var positionValue: [Currency: Decimal] = [:]
         var unrealized: [Currency: Decimal] = [:]
         var anyQuoted = false
+        // One-day P&L: the quote against the previous available close,
+        // in each position's own currency.
+        var dayChange: [Currency: Decimal] = [:]
+        var anyDayChange = false
         for position in positions {
             let quote = lastPrice?(position.currency, position.symbol)
             positionValue[position.currency, default: 0] += position.shares * (quote ?? position.averageCostPerShare)
             if let quote {
                 anyQuoted = true
                 unrealized[position.currency, default: 0] += (quote - position.averageCostPerShare) * position.shares
+                if let pair = dayPrices?(position.currency, position.symbol),
+                   pair.current == quote, pair.previous > 0 {
+                    anyDayChange = true
+                    dayChange[position.currency, default: 0] += (quote - pair.previous) * position.shares
+                }
             }
         }
 
@@ -278,6 +304,8 @@ extension AccountBalances {
             dividends: combined(dividends),
             unrealizedPnLByCurrency: unrealized,
             unrealizedPnL: anyQuoted ? combined(unrealized) : nil,
+            dayChangeByCurrency: dayChange,
+            dayChange: anyDayChange ? combined(dayChange) : nil,
             totalValue: totalValue,
             untrackedShorts: untrackedShorts
         )
@@ -290,6 +318,31 @@ extension AccountBalances {
 public typealias FXRate = (Currency, Currency) -> Decimal?
 /// Last price of a symbol quoted in the given currency.
 public typealias LastPrice = (Currency, String) -> Decimal?
+
+/// A price pair behind the one-day P&L: `current` is the price the
+/// position is valued at, `previous` the latest observation strictly
+/// older than that price's own date, and `modelBaseline` records
+/// whether that baseline was derived (backfilled) rather than observed
+/// — derived baselines track an underlying proxy, so consumers can
+/// label the resulting change instead of presenting it as a real
+/// two-market-day comparison.
+public struct DayPricePair: Hashable, Sendable {
+    public let current: Decimal
+    public let previous: Decimal
+    public let modelBaseline: Bool
+
+    public init(current: Decimal, previous: Decimal, modelBaseline: Bool = false) {
+        self.current = current
+        self.previous = previous
+        self.modelBaseline = modelBaseline
+    }
+
+    /// The day's price move as a fraction (`0.012` = +1.2%).
+    /// `nil` when the baseline price is not positive.
+    public var fraction: Decimal? {
+        previous > 0 ? (current - previous) / previous : nil
+    }
+}
 
 extension Portfolio {
     /// Find an account by its display name — trimmed and case-insensitive.
@@ -334,3 +387,5 @@ extension Portfolio {
         )
     }
 }
+/// Provider of one-day price pairs: `dayPrices(currency, symbol)`.
+public typealias DayPrices = (Currency, String) -> DayPricePair?

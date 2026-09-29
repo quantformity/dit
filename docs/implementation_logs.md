@@ -286,3 +286,32 @@ and the user decides.
   lookup (`price(onOrBefore:)` now delegates to it).
 - Verified live: observed Sept-17 close vs March-11 backfill vs Sunday
   fallback vs the USD/CAD pair; scenario suite 107/107, units green.
+
+## 2026-09-29 — account `--history`, currency-labelled values, one-day P&L
+
+- `dit account show <account> --history` (committed b5c7dca first): the
+  account's full ledger, oldest first, with 8-char tx IDs; offline by
+  construction; empty accounts print "no activity recorded". +4
+  scenario checks.
+- Holdings `Value` cells now carry the trading currency (`CAD 1,000.00`);
+  mixed-currency portfolios gain `Value (<display>)` — the converted
+  figure, dashed (never invented) when no FX rate exists, hidden when
+  every position already trades in the display currency.
+- One-day P&L: a `Day change` line, a `Day` column in By-currency and
+  Accounts, and `Day`/`Day%` in Holdings. Contract per the user: latest
+  quote compared against the PREVIOUS AVAILABLE market-data date —
+  `MarketData.point(strictlyBefore:for:)` (the quote's own day is never
+  its own baseline), no staleness cap, no carry-forward of cost basis:
+  no pair → dashed column absent, never a fake 0.00.
+- Plumbing: `DayPricePair` (current/previous/modelBaseline) feeds both
+  `AccountBalances.compute` and the holdings pass; pairs are accepted
+  only when `current` equals the price actually used, so a day figure
+  can never compare observations that never entered the summary.
+  Native-currency accumulation throughout (FX never masquerades as
+  trading P&L); combined values convert once, nil when unconvertible.
+- Derived baselines stay labelled: the footnote names tickers whose day
+  move is model-vs-live through a backfilled proxy.
+- Tests: +1 store lookup, +3 summary math (exact Decimal day totals,
+  mismatch-pair refusal, same-day exclusion), +3 renderer shape checks
+  (mixed table, unconvertible dashes, no-history keeps old layout).
+  Suite now 110 XCTest + 113 swift-testing, scenario 111/111.

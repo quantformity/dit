@@ -122,6 +122,113 @@ struct SummaryRendererTests {
         #expect(text.contains("- offline mode: positions at cost basis"))
     }
 
+    // MARK: Currency labels + one-day P&L columns
+
+    /// TD (CAD) holds 100 ENB.TO @ 40; QT (USD) holds 60 NVDA @ 180.
+    /// Quotes: ENB.TO 40.8, NVDA 178 (both today); USD→CAD 1.40.
+    /// Market store holds yesterday's closes: ENB.TO 40.0 (real) and
+    /// NVDA 180 (derived).
+    private func mixedPortfolio() -> Portfolio {
+        let td = Account(reportingCurrency: .cad, name: "TD Direct")
+        let qt = Account(reportingCurrency: .usd, name: "Questrade")
+        let buyEnb = Transaction(date: date(2025, 6, 2), accountID: td.id,
+                                 currency: .cad,
+                                 kind: .stockPurchase(StockDetails(ticker: "ENB.TO", shares: 100,
+                                                                    price: Decimal(string: "40")!)))
+        let buyNvda = Transaction(date: date(2025, 6, 2), accountID: qt.id,
+                                  currency: .usd,
+                                  kind: .stockPurchase(StockDetails(ticker: "NVDA", shares: 60,
+                                                                     price: Decimal(string: "180")!)))
+        return Portfolio(
+            accounts: [td, qt],
+            transactions: [
+                Transaction(date: date(2025, 6, 1), accountID: td.id, currency: .cad,
+                            kind: .deposit(amount: 10_000)),
+                Transaction(date: date(2025, 6, 1), accountID: qt.id, currency: .usd,
+                            kind: .deposit(amount: 12_000)),
+                buyEnb, buyNvda,
+            ],
+            tickers: [EquityTicker(symbol: "ENB.TO", name: "Enbridge"),
+                      EquityTicker(symbol: "NVDA", name: "Nvidia")]
+        )
+    }
+
+    @Test func mixedTableLabelsCurrenciesAndAddsDisplayColumn() {
+        let now = Date(timeIntervalSince1970: 1_758_000_000) // a Wednesday
+        let yesterday = now.addingTimeInterval(-86_400)
+        let cache = MarketDataCache()
+        cache.upsert(MarketQuote(symbol: "ENB.TO", currency: .cad, price: Decimal(string: "40.8")!,
+                                 asOf: now, source: "test"))
+        cache.upsert(MarketQuote(symbol: "NVDA", currency: .usd, price: 178, asOf: now, source: "test"))
+        cache.upsert(ExchangeRate(base: .usd, quote: .cad, rate: Decimal(string: "1.40")!,
+                                  asOf: now, source: "test"))
+        var market = MarketData()
+        market.series["ENB.TO"] = PriceSeries(symbol: "ENB.TO", currency: .cad,
+                                               points: [DailyPrice(day: yesterday, price: 40)])
+        market.series["NVDA"] = PriceSeries(symbol: "NVDA", currency: .usd,
+                                             points: [DailyPrice(day: yesterday, price: 180,
+                                                                  via: "derived via TSLA ÷ 16.2645")])
+
+        let summary = mixedPortfolio().summary(from: cache, market: market, now: now)
+        let text = SummaryRenderer.render(summary, date: now)
+
+        // Native values carry their currency code…
+        #expect(text.contains("CAD 4,080.00"))
+        #expect(text.contains("USD 10,680.00"))
+        // …and mixed portfolios gain the converted column.
+        #expect(text.contains("Value (CAD)"))
+        #expect(text.contains("14,952.00")) // 10,680 USD × 1.40
+        // Day columns: header line, tables, holdings.
+        #expect(text.contains("Day change       -88.00 CAD"))
+        #expect(text.contains("Day%"))
+        #expect(text.contains("+2.0%"))   // ENB.TO: 40.0 → 40.8
+        #expect(text.contains("-1.1%"))   // NVDA: 180 → 178
+        #expect(text.contains("-120.00")) // USD account row day figure
+        // Derived baselines are labelled, not hidden.
+        #expect(text.contains("derived proxy"))
+
+        // Single-currency, quoted, but NO market history: the tables
+        // keep their old shape — no dash-columns are manufactured.
+        let singleText = SummaryRenderer.render(cadPortfolio().summary(), date: now)
+        #expect(!singleText.contains("Value (CAD)"))
+        #expect(!singleText.contains("Day change"))
+        #expect(!singleText.contains("Day%"))
+        #expect(singleText.contains("CAD 6,000.00")) // cost-basis value still labelled
+    }
+
+    @Test func unconvertibleDisplayValuesDashInsteadOfGuessing() {
+        // Mixed currencies but no FX rate anywhere: the converted column
+        // appears (currencies mix) with dashes — never a made-up rate.
+        let now = Date(timeIntervalSince1970: 1_758_000_000)
+        let summary = mixedPortfolio().summary(displayCurrency: .cad)
+        let text = SummaryRenderer.render(summary, date: now)
+        #expect(text.contains("Value (CAD)"))
+        #expect(text.contains("USD 10,800.00")) // cost basis, unconverted
+        // No quotes at all → no day columns, and totals unconverted.
+        #expect(!text.contains("Day change"))
+        #expect(text.contains("unconverted"))
+    }
+
+    @Test func dayColumnsAppearOnlyWithPairedData() {
+        // Quote today, no stored history → nothing to compare against:
+        // the summary must NOT grow empty Day columns.
+        let cache = quote(portfolio: cadPortfolio(), price: Decimal(string: "65")!)
+        let noHistory = SummaryRenderer.render(cadPortfolio().summary(from: cache))
+        #expect(!noHistory.contains("Day change"))
+        #expect(!noHistory.contains("Day%"))
+
+        // With a previous close stored, the columns appear and carry
+        // real numbers (65 vs 64 → +1.0% on the 6,000 cost = +100).
+        var market = MarketData()
+        let asOf = Date()
+        market.series["SHOP.TO"] = PriceSeries(symbol: "SHOP.TO", currency: .cad,
+                                                points: [DailyPrice(day: asOf.addingTimeInterval(-86_400),
+                                                                     price: Decimal(string: "64")!)])
+        let withHistory = SummaryRenderer.render(cadPortfolio().summary(from: cache, market: market))
+        #expect(withHistory.contains("Day change       100.00 CAD"))
+        #expect(withHistory.contains("+1.6%"))
+    }
+
     private func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
         Calendar(identifier: .gregorian).date(from: DateComponents(year: year, month: month, day: day))!
     }

@@ -311,7 +311,18 @@ enum Main {
                 }
             }
             notes.append(contentsOf: stalenessNotes(cache: cache, symbols: plan.symbols))
-            summary = portfolio.summary(from: cache, displayCurrency: global.display, maxAge: 3 * 86_400)
+            // Read-only peek at the market store for the one-day P&L:
+            // each quote is paired with that ticker's previous stored
+            // close. The store is a cache — an absent or unreadable one
+            // just means "no daily data", never a failed summary.
+            var marketData: MarketData?
+            do {
+                let (marketStore, _) = try openMarketStore(global: global)
+                marketData = try await marketStore.load()
+            } catch {
+                notes.append("market store unreadable: \(error) — no day-change data")
+            }
+            summary = portfolio.summary(from: cache, market: marketData, displayCurrency: global.display, maxAge: 3 * 86_400)
         }
         notes.append(contentsOf: untrackedShortNotes(summary))
 
@@ -2172,6 +2183,12 @@ enum Main {
               Portfolio summary: totals, per-currency rows, per-account
               values, holdings. Costs the network unless --offline.
               --display must be a supported currency code (e.g. CAD, USD, GBp).
+
+              Holdings show values in their own trading currency (with
+              the code), a converted 'Value (<display>)' column when
+              currencies mix, and one-day 'Day'/'Day%' columns comparing
+              the latest quote with the previous stored close (from the
+              market store; dashed — never guessed — when unavailable).
             """
         case ("accounts", _), ("account", nil), ("account", "list"):
             return """

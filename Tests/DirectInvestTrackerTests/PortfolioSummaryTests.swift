@@ -282,4 +282,129 @@ struct PortfolioSummaryTests {
         #expect(plan.symbols.isEmpty)
         #expect(plan.fxCurrencies.isEmpty)
     }
+
+    // MARK: One-day P&L (quote vs previous available close)
+
+    /// TD (CAD): 100 ENB.TO @ 40, quoted 40.8 against a prior close of
+    /// 40.0 → +80 CAD. QT (USD): 60 NVDA @ 180, quoted 178 against a
+    /// DERIVED prior close of 180 → −120 USD. At USD→CAD 1.40 the
+    /// combined day change is 80 − 168 = −88 CAD.
+    private var dayPnLPortfolio: Portfolio {
+        let td = Account(reportingCurrency: .cad, name: "TD")
+        let qt = Account(reportingCurrency: .usd, name: "QT")
+        return Portfolio(
+            accounts: [td, qt],
+            transactions: [
+                deposit(td, 10_000, on: day(1)),
+                buy(td, "ENB.TO", shares: 100, at: 40, on: day(2)),
+                deposit(qt, 12_000, on: day(1)),
+                buy(qt, "NVDA", shares: 60, at: 180, on: day(2)),
+            ],
+            tickers: [
+                EquityTicker(symbol: "ENB.TO", name: "Enbridge"),
+                EquityTicker(symbol: "NVDA", name: "Nvidia"),
+            ]
+        )
+    }
+
+    @Test func dayChangeIsExactPerCurrencyAndCombinedOnce() {
+        let p408 = Decimal(string: "40.8")!
+        let p178: Decimal = 178
+        let p40: Decimal = 40
+        let p180: Decimal = 180
+        let s = dayPnLPortfolio.summary(
+            rate: { from, to in from == .usd && to == .cad ? Decimal(string: "1.40")! : nil },
+            lastPrice: { c, sym in
+                if c == .cad && sym == "ENB.TO" { return p408 }
+                if c == .usd && sym == "NVDA" { return p178 }
+                return nil
+            },
+            dayPrices: { c, sym in
+                if c == .cad && sym == "ENB.TO" { return DayPricePair(current: p408, previous: p40) }
+                if c == .usd && sym == "NVDA" { return DayPricePair(current: p178, previous: p180, modelBaseline: true) }
+                return nil
+            }
+        )
+
+        // Native sums stay exact; conversion happens only in the combined
+        // figure (no FX drift masquerading as trading P&L).
+        #expect(s.dayChangeByCurrency == [Currency.cad: 80, Currency.usd: -120])
+        let combinedDay: Decimal = -88
+        #expect(s.dayChange == combinedDay)
+
+        // Account rows in their reporting currency…
+        let td = s.accounts.first { $0.account.name == "TD" }!
+        let qt = s.accounts.first { $0.account.name == "QT" }!
+        #expect(td.dayChangeByCurrency == [Currency.cad: 80])
+        #expect(qt.dayChangeByCurrency == [Currency.usd: -120])
+        let ownCurrency: Decimal = -120
+        #expect(qt.dayChange == ownCurrency) // USD account: no conversion
+
+        // Holdings carry the native day change and the price move.
+        let enb = s.holdings.first { $0.symbol == "ENB.TO" }!
+        let nvda = s.holdings.first { $0.symbol == "NVDA" }!
+        let enbChange: Decimal = 80
+        let nvdaChange: Decimal = -120
+        #expect(enb.dayChange == enbChange)
+        #expect(nvda.dayChange == nvdaChange)
+        let enbFraction = Decimal(string: "0.8")! / Decimal(40)
+        #expect(enb.dayChangeFraction == enbFraction)
+        let nvdaFraction = Decimal(-2) / Decimal(180)
+        #expect(nvda.dayChangeFraction == nvdaFraction)
+        #expect(!enb.dayChangeModelBaseline)
+        #expect(nvda.dayChangeModelBaseline)
+
+        // Values in the display currency: CAD stays, USD converts.
+        let enbValue: Decimal = 4_080
+        let nvdaValue: Decimal = 14_952 // 60 × 178 × 1.40
+        #expect(enb.valueInDisplayCurrency == enbValue)
+        #expect(nvda.valueInDisplayCurrency == nvdaValue)
+    }
+
+    @Test func dayChangeRefusesUnpairedPrices() {
+        let price: LastPrice = { _, _ in Decimal(100) }
+        // A quote alone is not a day change — there must be an earlier
+        // observation to compare against…
+        let s1 = dayPnLPortfolio.summary(
+            lastPrice: price,
+            dayPrices: { _, _ in nil }
+        )
+        #expect(s1.dayChange == nil)
+        #expect(s1.dayChangeByCurrency.isEmpty)
+        #expect(s1.holdings.allSatisfy { $0.dayChange == nil && $0.dayChangeFraction == nil })
+
+        // …and the pair must describe the price actually used. A pair
+        // whose `current` (95) differs from the quote (100) compares two
+        // observations that never entered the summary → ignored.
+        let mismatched: DayPrices = { _, _ in DayPricePair(current: 95, previous: 94) }
+        let s2 = dayPnLPortfolio.summary(
+            lastPrice: price,
+            dayPrices: mismatched
+        )
+        #expect(s2.dayChange == nil)
+        #expect(s2.holdings.allSatisfy { $0.dayChange == nil })
+    }
+
+    @Test func dayChangeFromMarketSkipsTheQuoteDayItself() {
+        let now = Date(timeIntervalSince1970: 1_758_000_000) // a Wednesday
+        let yesterday = now.addingTimeInterval(-86_400)
+        let cache = MarketDataCache()
+        cache.upsert(MarketQuote(symbol: "NVDA", currency: .usd, price: 178, asOf: now, source: "test"))
+        var market = MarketData()
+        market.series["NVDA"] = PriceSeries(symbol: "NVDA", currency: .usd, points: [
+            DailyPrice(day: yesterday, price: 180, via: "derived via TSLA ÷ 16.2645"),
+            DailyPrice(day: now, price: 178), // today's close exists but is the quote's own day
+        ])
+        let s = dayPnLPortfolio.summary(from: cache, market: market, now: now)
+        let nvda = s.holdings.first { $0.symbol == "NVDA" }!
+        let change: Decimal = -120
+        #expect(nvda.dayChange == change)            // against the DERIVED 180, not today's 178
+        #expect(nvda.dayChangeModelBaseline)          // labelled as a model comparison
+
+        // Only a same-day point exists → nothing to compare against.
+        var single = MarketData()
+        single.series["NVDA"] = PriceSeries(symbol: "NVDA", currency: .usd, points: [DailyPrice(day: now, price: 178)])
+        let s2 = dayPnLPortfolio.summary(from: cache, market: single, now: now)
+        #expect(s2.holdings.first { $0.symbol == "NVDA" }!.dayChange == nil)
+    }
 }

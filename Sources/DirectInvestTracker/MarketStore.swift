@@ -191,6 +191,18 @@ public struct MarketData: Codable, Hashable, Sendable {
         return series.points.last { $0.day <= day }
     }
 
+    /// The newest stored observation strictly before `day`, with
+    /// provenance — the "previous available close" behind the one-day
+    /// P&L. The valued day is never its own baseline, even when today's
+    /// close is already stored (and even when the quote is a weekend or
+    /// holiday echo of an older close: its own day is used as the
+    /// boundary).
+    public func point(strictlyBefore day: Date, for symbol: String) -> DailyPrice? {
+        guard let series = series[symbol], !series.points.isEmpty else { return nil }
+        let day = DailyPrice.utcDay(day)
+        return series.points.last { $0.day < day }
+    }
+
     /// The newest stored price on or before `day` (provenance elided).
     public func price(onOrBefore day: Date, for symbol: String) -> Decimal? {
         point(onOrBefore: day, for: symbol)?.price

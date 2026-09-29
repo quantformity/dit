@@ -86,6 +86,15 @@ public enum SummaryRenderer {
         let display = summary.displayCurrency.rawValue
         var lines: [String] = []
 
+        // Daily-change columns appear only where a real pair exists
+        // (a quote and an earlier stored close). Without market data —
+        // offline runs, fresh stores — the tables keep their old shape
+        // instead of showing a column of meaningless dashes.
+        let showDay = summary.holdings.contains { $0.dayChange != nil }
+        // A "value in display currency" column only says something when
+        // at least one holding is priced in another currency.
+        let showConverted = summary.holdings.contains { $0.currency != summary.displayCurrency }
+
         // --- Header + grand totals -----------------------------------
         lines.append("Portfolio summary — \(dateFormatter.string(from: date))  (display: \(display))")
         lines.append("")
@@ -95,6 +104,9 @@ public enum SummaryRenderer {
         lines.append("  GICs (at par)    \(money(summary.gicValue, display))")
         lines.append("")
         lines.append("  Unrealized P&L   \(money(summary.unrealizedPnL, display))")
+        if showDay {
+            lines.append("  Day change       \(money(summary.dayChange, display))   (vs previous close)")
+        }
         lines.append("  Realized P&L     \(money(summary.realizedPnL, display))")
         lines.append("  Dividends        \(money(summary.dividends, display))")
 
@@ -105,20 +117,21 @@ public enum SummaryRenderer {
         if byCurrency.isEmpty {
             lines.append("  —")
         } else {
-            let rows = byCurrency.map { currency in
+            let rows = byCurrency.map { currency -> [String] in
                 let cash = summary.cashByCurrency[currency] ?? 0
                 let positions = summary.positionValueByCurrency[currency] ?? 0
                 let gic = summary.gicValueByCurrency[currency] ?? 0
                 let total = summary.valueByCurrency[currency] ?? 0
-                return [
+                var row = [
                     currency.rawValue,
                     money2(cash), money2(positions), money2(gic), money2(total)
                 ]
+                if showDay { row.append(money2(summary.dayChangeByCurrency[currency])) }
+                return row
             }
-            lines.append(contentsOf: Table.render(
-                headers: ["Ccy", "Cash", "Positions", "GIC", "Total"],
-                rows: rows
-            ))
+            var headers = ["Ccy", "Cash", "Positions", "GIC", "Total"]
+            if showDay { headers.append("Day") }
+            lines.append(contentsOf: Table.render(headers: headers, rows: rows))
         }
 
         // --- Per-account table ----------------------------------------
@@ -127,8 +140,8 @@ public enum SummaryRenderer {
         if summary.accounts.isEmpty {
             lines.append("  —")
         } else {
-            let rows = summary.accounts.map { balance in
-                [
+            let rows = summary.accounts.map { balance -> [String] in
+                var row = [
                     accountName(balance.account),
                     balance.account.reportingCurrency.rawValue,
                     money2(balance.cash),
@@ -137,9 +150,13 @@ public enum SummaryRenderer {
                     money2(balance.totalValue),
                     money2(balance.unrealizedPnL)
                 ]
+                if showDay { row.append(money2(balance.dayChange)) }
+                return row
             }
+            var headers = ["Name", "Ccy", "Cash", "Positions", "GIC", "Total", "Unrealized"]
+            if showDay { headers.append("Day") }
             lines.append(contentsOf: Table.render(
-                headers: ["Name", "Ccy", "Cash", "Positions", "GIC", "Total", "Unrealized"],
+                headers: headers,
                 rows: rows,
                 leftColumns: [0]
             ))
@@ -172,21 +189,35 @@ public enum SummaryRenderer {
                 } else {
                     pnlPct = "—"
                 }
-                return [
+                var row: [String] = [
                     holding.symbol,
                     holding.name ?? "",
                     holding.currency.rawValue,
                     shares(holding.shares),
                     money2(holding.averageCostPerShare),
                     last,
-                    money2(holding.value),
-                    money2(holding.unrealizedPnL),
-                    pnlPct,
-                    holding.accountNames.joined(separator: ", ")
+                    // Native value carries its currency code: in a
+                    // mixed-currency table an unmarked number is not
+                    // self-describing.
+                    "\(holding.currency.rawValue) \(money2(holding.value))"
                 ]
+                if showConverted {
+                    row.append(money2(holding.valueInDisplayCurrency))
+                }
+                if showDay {
+                    row.append(money2(holding.dayChange))
+                    row.append(holding.dayChangeFraction.map(percent) ?? "—")
+                }
+                row.append(contentsOf: [money2(holding.unrealizedPnL), pnlPct,
+                                        holding.accountNames.joined(separator: ", ")])
+                return row
             }
+            var headers = ["Symbol", "Name", "Ccy", "Shares", "Avg cost", "Last", "Value"]
+            if showConverted { headers.append("Value (\(display))") }
+            if showDay { headers.append(contentsOf: ["Day", "Day%"]) }
+            headers.append(contentsOf: ["P&L", "P&L%", "Where"])
             lines.append(contentsOf: Table.render(
-                headers: ["Symbol", "Name", "Ccy", "Shares", "Avg cost", "Last", "Value", "P&L", "P&L%", "Where"],
+                headers: headers,
                 rows: rows,
                 leftColumns: [0, 1]
             ))
@@ -194,6 +225,15 @@ public enum SummaryRenderer {
 
         // --- Footnotes ---------------------------------------------------
         var allNotes = notes
+        if showDay {
+            allNotes.append("day change = latest quote vs the previous stored close of the same ticker (a model comparison where history is derived)")
+        }
+        let modelDaySymbols = summary.holdings
+            .filter { $0.dayChange != nil && $0.dayChangeModelBaseline }
+            .map(\.symbol).sorted()
+        if !modelDaySymbols.isEmpty {
+            allNotes.append("day change for \(modelDaySymbols.joined(separator: ", ")) mirrors the underlying's move through a derived proxy — it is not a real quote of these tickers")
+        }
         for holding in summary.holdings where holding.unrealizedPnL == nil {
             allNotes.append("\(holding.symbol) (\(holding.currency.rawValue)) valued at cost basis — no fresh quote")
         }

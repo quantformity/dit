@@ -98,6 +98,26 @@ final class MarketStoreTests: XCTestCase {
         XCTAssertNil(loaded.price(onOrBefore: StubMarketProvider.day("2026-01-01")!, for: "AAPL"))
     }
 
+    func testStrictlyBeforeNeverReturnsTheQuotedDayItself() {
+        var data = MarketData()
+        data.mergeSeries(symbol: "TSLA.NE", currency: .cad, points: [
+            DailyPrice(day: StubMarketProvider.day("2026-01-02")!, price: 29.5),          // Friday
+            DailyPrice(day: StubMarketProvider.day("2026-01-05")!, price: 30,
+                       via: "derived via TSLA ÷ 16.2645"),                                 // Monday
+            DailyPrice(day: StubMarketProvider.day("2026-01-06")!, price: 31),             // Tuesday
+        ])
+        // A Tuesday quote is compared to Monday — never to Tuesday itself,
+        // even though Tuesday's close is already stored.
+        let monday = data.point(strictlyBefore: StubMarketProvider.day("2026-01-06")!, for: "TSLA.NE")
+        XCTAssertEqual(monday?.price, 30)
+        XCTAssertNotNil(monday?.via)   // provenance survives for labelling
+        // A Sunday quote (weekend echo of Monday) looks back past the
+        // weekend gap to Friday.
+        XCTAssertEqual(data.point(strictlyBefore: StubMarketProvider.day("2026-01-04")!, for: "TSLA.NE")?.price, 29.5)
+        XCTAssertNil(data.point(strictlyBefore: StubMarketProvider.day("2026-01-02")!, for: "TSLA.NE"))
+        XCTAssertNil(data.point(strictlyBefore: StubMarketProvider.day("2026-01-06")!, for: "GHOST"))
+    }
+
     func testLatestSectionKeepsOnlyTheNewestPerSymbol() async throws {
         var data = MarketData()
         data.replaceLatest(MarketQuote(symbol: "AAPL", currency: .usd, price: 250))

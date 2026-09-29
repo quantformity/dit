@@ -30,6 +30,24 @@ public struct TickerHolding: Hashable, Sendable {
     /// underlying positions; `nil` when none of them received a quote.
     public let unrealizedPnL: Decimal?
 
+    /// Value in ``PortfolioSummary/displayCurrency``; `nil` when no rate
+    /// could convert it (or the position is already in that currency and
+    /// the display column would only repeat the native one).
+    public let valueInDisplayCurrency: Decimal?
+
+    /// One-day P&L in the trading currency: the value change since each
+    /// underlying position's previous available close. `nil` when no
+    /// fresh quote pairs with an earlier observation.
+    public let dayChange: Decimal?
+
+    /// `dayChange` as a fraction of the previous-close value — a price
+    /// move, not a return on cost. `nil` with no daily data.
+    public let dayChangeFraction: Decimal?
+
+    /// True when any underlying position's baseline was derived
+    /// (backfilled proxy history) rather than an observed close.
+    public let dayChangeModelBaseline: Bool
+
     /// Display names of the accounts that hold this position.
     public let accountNames: [String]
 
@@ -43,6 +61,10 @@ public struct TickerHolding: Hashable, Sendable {
         cost: Decimal,
         value: Decimal,
         unrealizedPnL: Decimal?,
+        valueInDisplayCurrency: Decimal? = nil,
+        dayChange: Decimal? = nil,
+        dayChangeFraction: Decimal? = nil,
+        dayChangeModelBaseline: Bool = false,
         accountNames: [String]
     ) {
         self.symbol = symbol
@@ -52,6 +74,10 @@ public struct TickerHolding: Hashable, Sendable {
         self.averageCostPerShare = shares > 0 ? cost / shares : 0
         self.value = value
         self.unrealizedPnL = unrealizedPnL
+        self.valueInDisplayCurrency = valueInDisplayCurrency
+        self.dayChange = dayChange
+        self.dayChangeFraction = dayChangeFraction
+        self.dayChangeModelBaseline = dayChangeModelBaseline
         self.accountNames = accountNames
     }
 }
@@ -94,6 +120,9 @@ public struct PortfolioSummary: Hashable, Sendable {
     public let realizedPnLByCurrency: [Currency: Decimal]
     public let dividendsByCurrency: [Currency: Decimal]
     public let unrealizedPnLByCurrency: [Currency: Decimal]
+    /// One-day P&L per currency (native, exact) — the change since each
+    /// position's previous available close. Empty without daily data.
+    public let dayChangeByCurrency: [Currency: Decimal]
 
     /// Total account value per currency: cash + position value +
     /// live GIC principal.
@@ -114,6 +143,9 @@ public struct PortfolioSummary: Hashable, Sendable {
     public let dividends: Decimal?
     /// `nil` when no position received a quote.
     public let unrealizedPnL: Decimal?
+    /// `dayChangeByCurrency` in `displayCurrency`; `nil` when there is
+    /// no daily data or a component could not be converted.
+    public let dayChange: Decimal?
     /// Cash + position value + live GICs, in `displayCurrency`; `nil`
     /// when any component could not be converted.
     public let totalValue: Decimal?
@@ -133,12 +165,14 @@ public struct PortfolioSummary: Hashable, Sendable {
         realizedPnLByCurrency: [Currency: Decimal],
         dividendsByCurrency: [Currency: Decimal],
         unrealizedPnLByCurrency: [Currency: Decimal],
+        dayChangeByCurrency: [Currency: Decimal],
         cash: Decimal?,
         positionValue: Decimal?,
         gicValue: Decimal?,
         realizedPnL: Decimal?,
         dividends: Decimal?,
         unrealizedPnL: Decimal?,
+        dayChange: Decimal? = nil,
         totalValue: Decimal?,
         untrackedShorts: [ShortSaleFlag] = []
     ) {
@@ -157,6 +191,8 @@ public struct PortfolioSummary: Hashable, Sendable {
         self.realizedPnL = realizedPnL
         self.dividends = dividends
         self.unrealizedPnL = unrealizedPnL
+        self.dayChangeByCurrency = dayChangeByCurrency
+        self.dayChange = dayChange
         self.totalValue = totalValue
         self.untrackedShorts = untrackedShorts
     }
@@ -195,17 +231,23 @@ extension Portfolio {
     ///   - lastPrice: optional provider `lastPrice(currency, symbol)`.
     ///     Unquoted positions are valued at cost basis and excluded
     ///     from P&L.
+    ///   - dayPrices: optional provider pairing the valuation price with
+    ///     each ticker's previous available close (see ``DayPricePair``);
+    ///     drives the one-day P&L figures. Without it (or without
+    ///     matching pairs) daily change stays `nil` — never guessed.
     public func summary(
         displayCurrency: Currency = .cad,
         rate: FXRate? = nil,
-        lastPrice: LastPrice? = nil
+        lastPrice: LastPrice? = nil,
+        dayPrices: DayPrices? = nil
     ) -> PortfolioSummary {
         let balances = accounts.map { account in
             AccountBalances.compute(
                 account: account,
                 transactions: transactions(in: account.id),
                 rate: rate,
-                lastPrice: lastPrice
+                lastPrice: lastPrice,
+                dayPrices: dayPrices
             )
         }
 
@@ -238,12 +280,26 @@ extension Portfolio {
             .map(\.element)
 
         // --- Holdings pass -------------------------------------------------
+        /// Convert a single amount into the display currency; `nil`
+        /// when it cannot be converted (same rules as `toDisplay`).
+        func convert(_ amount: Decimal, from currency: Currency) -> Decimal? {
+            if currency == displayCurrency { return amount }
+            guard let rate else { return nil }
+            if let direct = rate(currency, displayCurrency) { return amount * direct }
+            if let inverse = rate(displayCurrency, currency), inverse != 0 { return amount / inverse }
+            return nil
+        }
+
         struct Accumulator {
             var shares: Decimal = 0
             var cost: Decimal = 0
             var value: Decimal = 0
             var unrealized: Decimal = 0
             var anyQuoted = false
+            var dayChange: Decimal = 0
+            var anyDay = false
+            var dayModel = false
+            var dayFraction: Decimal?
             var accountNames: [String] = []
         }
         var holdingsByKey: [PositionKey: Accumulator] = [:]
@@ -263,6 +319,16 @@ extension Portfolio {
                 if let quote {
                     acc.anyQuoted = true
                     acc.unrealized += (quote - position.averageCostPerShare) * position.shares
+                    // The pair must match the price actually used, and
+                    // its `current` must be that same observation — a
+                    // day change only ever compares what is displayed.
+                    if let pair = dayPrices?(position.currency, position.symbol),
+                       pair.current == quote, pair.previous > 0 {
+                        acc.anyDay = true
+                        acc.dayChange += (quote - pair.previous) * position.shares
+                        acc.dayModel = acc.dayModel || pair.modelBaseline
+                        acc.dayFraction = pair.fraction
+                    }
                 }
                 acc.accountNames.append(displayName(of: balance.account))
                 holdingsByKey[key] = acc
@@ -278,6 +344,10 @@ extension Portfolio {
                 cost: acc.cost,
                 value: acc.value,
                 unrealizedPnL: acc.anyQuoted ? acc.unrealized : nil,
+                valueInDisplayCurrency: convert(acc.value, from: key.currency),
+                dayChange: acc.anyDay ? acc.dayChange : nil,
+                dayChangeFraction: acc.anyDay ? acc.dayFraction : nil,
+                dayChangeModelBaseline: acc.dayModel,
                 accountNames: Array(Set(acc.accountNames)).sorted()
             )
         }
@@ -310,7 +380,9 @@ extension Portfolio {
         let realizedPnLByCurrency = sum(balances.map(\.realizedPnLByCurrency))
         let dividendsByCurrency = sum(balances.map(\.dividendsByCurrency))
         let unrealizedPnLByCurrency = sum(balances.map(\.unrealizedPnLByCurrency))
+        let dayChangeByCurrency = sum(balances.map(\.dayChangeByCurrency))
         let anyQuoted = holdingsByKey.values.contains(where: { $0.anyQuoted })
+        let anyDayChange = balances.contains { !$0.dayChangeByCurrency.isEmpty }
 
         // --- Combined in the display currency --------------------------------
         /// Convert per-currency amounts into `displayCurrency`. Returns
@@ -352,12 +424,14 @@ extension Portfolio {
             realizedPnLByCurrency: realizedPnLByCurrency,
             dividendsByCurrency: dividendsByCurrency,
             unrealizedPnLByCurrency: unrealizedPnLByCurrency,
+            dayChangeByCurrency: dayChangeByCurrency,
             cash: cashTotal,
             positionValue: positionTotal,
             gicValue: gicTotal,
             realizedPnL: toDisplay(realizedPnLByCurrency),
             dividends: toDisplay(dividendsByCurrency),
             unrealizedPnL: anyQuoted ? toDisplay(unrealizedPnLByCurrency) : nil,
+            dayChange: anyDayChange ? toDisplay(dayChangeByCurrency) : nil,
             totalValue: totalValue,
             untrackedShorts: untrackedShorts
         )
@@ -371,6 +445,13 @@ extension Portfolio {
     /// quotes only; positions without a fresh quote fall back to cost
     /// basis and are excluded from P&L).
     ///
+    /// When `market` is supplied it also powers the one-day P&L: each
+    /// position's quote is compared against that ticker's latest stored
+    /// close strictly older than the quote's own day ("today versus the
+    /// previous available market data", even if it is days old or
+    /// derived — derived baselines are flagged so the display can say
+    /// so). A position without such a pair shows no day change.
+    ///
     /// - Parameter maxAge: how old a quote may be and still drive a
     ///   valuation. The default (60 s) is the strict, live-trading
     ///   rule; a summary tool run outside market hours may pass a
@@ -379,14 +460,27 @@ extension Portfolio {
     ///   the user.
     public func summary(
         from cache: MarketDataCache,
+        market: MarketData? = nil,
         displayCurrency: Currency = .cad,
         maxAge: TimeInterval = 60,
         now: Date = .now
     ) -> PortfolioSummary {
-        summary(
+        let dayPrices: DayPrices? = market.map { data in
+            { currency, symbol in
+                guard let quote = cache.freshQuote(for: symbol, maxAge: maxAge, now: now),
+                      quote.currency == currency,
+                      let previous = data.point(strictlyBefore: quote.asOf ?? now, for: symbol),
+                      previous.price > 0
+                else { return nil }
+                return DayPricePair(current: quote.price, previous: previous.price,
+                                    modelBaseline: previous.via != nil)
+            }
+        }
+        return summary(
             displayCurrency: displayCurrency,
             rate: { from, to in cache.routedRate(from: from, to: to) },
-            lastPrice: { currency, symbol in cache.lastPrice(for: currency, symbol: symbol, maxAge: maxAge, now: now) }
+            lastPrice: { currency, symbol in cache.lastPrice(for: currency, symbol: symbol, maxAge: maxAge, now: now) },
+            dayPrices: dayPrices
         )
     }
 }

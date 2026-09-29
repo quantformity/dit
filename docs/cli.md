@@ -64,6 +64,29 @@ movement never masquerades as gain, dashed when there is no real quote
 or the cost basis is zero/negative), and footnotes for facts the
 summary can't price (GICs at par, untracked shorts, etc.).
 
+Value conventions in the tables:
+
+- Holding `Value` cells carry the position's own trading currency
+  (`CAD 6,000.00`, `USD 284,256.00`) — an unmarked number in a
+  mixed-currency table is not self-describing.
+- When the portfolio mixes currencies, holdings gain a second
+  `Value (<display>)` column: the same value converted at the current
+  FX rate. Unconvertible → dashed with a footnote; a rate is never
+  invented. Hidden for single-currency portfolios (it would only
+  repeat the native column).
+- With market data available, a one-day **`Day`/`Day%`** change appears
+  (plus a `Day` column in the By-currency and Accounts tables and a
+  `Day change` line at the top): each position's latest quote compared
+  with that ticker's **previous available stored close** — the last
+  observation strictly older than the quote's own day, however old,
+  from the market store. Amounts stay in the position's native
+  currency except where a table is explicitly in the display currency
+  (converted once at the total). No pair → dashed, never a fabricated
+  0.00. When the baseline was a derived (backfilled) point — e.g. the
+  .NE trackers' proxy history — the footnote says so: the day move
+  mirrors the underlying through the model, it is not a real quote of
+  that ticker.
+
 ## Accounts
 
 `<account>` in every account command is a name (case-insensitive,
