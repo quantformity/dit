@@ -1187,7 +1187,19 @@ enum Main {
         let report = try await updater.updateLatest(portfolio: portfolio,
                                                     displayCurrency: global.display)
         print("Latest market data — \(configuration.backend.rawValue) at \(configuration.url.path)")
-        for line in report.lines { print("  \(line)") }
+        if report.latestRows.isEmpty {
+            for line in report.lines { print("  \(line)") }
+        } else {
+            // One aligned table: symbols and FX pairs share the ruler,
+            // so prices line up decimal-point to decimal-point.
+            let rows = report.latestRows
+                .sorted { $0.name < $1.name }
+                .map { [$0.name, $0.price, $0.ccy, $0.asOf] }
+            for line in Table.render(headers: ["Symbol/Pair", "Price", "Ccy", "As of (local)"],
+                                     rows: rows, leftColumns: [0, 3]) {
+                print("  \(line)")
+            }
+        }
         for failure in report.failures { printErr("warning: \(failure)") }
         print("next: 'dit market history' fills daily closes for every held day")
     }
@@ -1216,6 +1228,21 @@ enum Main {
                                                      eraseFirst: options.has("all"))
         print("Daily history — \(configuration.backend.rawValue) at \(configuration.url.path)")
         for line in report.lines { print("  \(line)") }
+        if !report.historyRows.isEmpty {
+            if report.seriesFetched == 0 {
+                // Nothing actually happened — one honest summary line
+                // instead of a wall of identical "skipped" rows.
+                print("  nothing to fetch — all \(report.historyRows.count) series are covered through their holding windows")
+            } else {
+                let rows = report.historyRows.map { [$0.name, $0.result, $0.range] }
+                for line in Table.render(headers: ["Series", "Result", "Range"],
+                                         rows: rows, leftColumns: [0, 1, 2]) {
+                    print("  \(line)")
+                }
+            }
+        } else if report.lines.isEmpty {
+            print("  nothing to fetch — every series is covered through its holding window (or nothing was ever held)")
+        }
         for failure in report.failures { printErr("warning: \(failure)") }
         // Every fetch failing with nothing stored means the network
         // answer taught us nothing — say so loudly (exit 1).
@@ -1229,7 +1256,7 @@ enum Main {
         let options = try Options(args, valueOptions: ["symbol", "days"])
         guard options.positionals.isEmpty else {
             throw ParseError("unexpected argument '\(options.positionals[0])' — "
-                + "filter history with --symbol (see 'dit help market')")
+                + "filter both tables with --symbol (see 'dit help market')")
         }
         let (marketStore, configuration) = try openMarketStore(global: global)
         let data = try await marketStore.load()
@@ -1257,22 +1284,36 @@ enum Main {
         }
         print("  updated: \(quoteStamp(data.updatedAt))")
 
-        if !data.latestQuotes.isEmpty || !data.latestRates.isEmpty {
+        // --symbol filters BOTH sections — the whole point of asking
+        // about one ticker is to see only that ticker.
+        var latestQuotes = data.latestQuotes
+        var latestRates = data.latestRates
+        if let symbolFilter, !symbolFilter.isEmpty {
+            latestQuotes = latestQuotes.filter { $0.symbol == symbolFilter }
+            latestRates = latestRates.filter { "\($0.base.rawValue)/\($0.quote.rawValue)" == symbolFilter }
+            if latestQuotes.isEmpty, latestRates.isEmpty, shownSeries.isEmpty {
+                print("  nothing stored for '\(symbolFilter)' — 'dit market latest' / 'dit market history' fill this store")
+                return
+            }
+        }
+
+        if !latestQuotes.isEmpty || !latestRates.isEmpty {
             print("\nLatest (one per symbol, overwritten by 'dit market latest'):")
-            var rows = data.latestQuotes
+            var rows = latestQuotes
                 .sorted { $0.symbol < $1.symbol }
                 .map { quote in
                     [quote.symbol, trim(quote.price),
                      quote.currency == .unknown ? "?" : quote.currency.rawValue,
-                     quoteStamp(quote.asOf)]
+                     quote.asOf.map { MarketUpdater.stampShort($0) } ?? "unknown"]
                 }
-            rows += data.latestRates
+            rows += latestRates
                 .sorted { "\($0.base)" < "\($1.base)" }
                 .map { rate in
                     ["\(rate.base.rawValue)/\(rate.quote.rawValue)", trim(rate.rate),
-                     rate.quote.rawValue, quoteStamp(rate.asOf)]
+                     rate.quote.rawValue,
+                     rate.asOf.map { MarketUpdater.stampShort($0) } ?? "unknown"]
                 }
-            for line in Table.render(headers: ["Symbol", "Price", "Ccy", "AsOf"], rows: rows) {
+            for line in Table.render(headers: ["Symbol", "Price", "Ccy", "As of (local)"], rows: rows) {
                 print("  \(line)")
             }
         }
@@ -2515,7 +2556,11 @@ enum Main {
                                              underlying
               dit market import FILE         seed real closes (CSV:
                                              SYMBOL,YYYY-MM-DD,PRICE)
-              dit market show [--symbol S] [--days N]   what the store holds
+              dit market show [--symbol S] [--days N]
+                                             what the store holds (aligned
+                                             tables; --symbol restricts
+                                             BOTH the Latest and History
+                                             tables to one ticker)
 
               backfill options: --from SOURCE, --ratio R (skip
               calibration), --dry-run. The ratio is averaged over the
@@ -2540,6 +2585,9 @@ enum Main {
               'show' work offline: import stores what you measured (an
               old app's cache, a vendor file), show marks which points
               are real and which were derived (see 'dit market backfill').
+              A history run that fetches nothing collapses to one
+              summary line — a wall of identical 'skipped' rows teaches
+              nothing.
             """
         case ("quote", _):
             return """

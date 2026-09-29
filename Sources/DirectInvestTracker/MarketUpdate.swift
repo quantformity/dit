@@ -133,10 +133,35 @@ extension Portfolio {
 
 // MARK: - Update engine
 
-/// The outcome of one market-store update run, as report lines plus
-/// counters. The CLI prints it; tests assert on it.
+/// One row of the "latest snapshot" table (`market latest`, and the
+/// latest section of `market show`). Human-table display data — the
+/// machine contract does not use these.
+public struct LatestRow: Sendable {
+    public let name: String
+    public let price: String
+    public let ccy: String
+    public let asOf: String
+}
+
+/// One row of the daily-history table: what happened to one series in
+/// an update run. `result` is self-describing ("+5 daily closes",
+/// "complete — skipped"); `range` is the window examined or touched.
+public struct HistoryRow: Sendable {
+    public let name: String
+    public let result: String
+    public let range: String
+}
+
+/// The outcome of one market-store update run: printable table rows,
+/// prose notes, failures, and counters. The CLI renders it; tests
+/// assert on it.
 public struct MarketUpdateReport: Sendable {
+    /// Prose notes (erase warnings, quiet no-op explanations).
     public var lines: [String] = []
+    /// Latest-snapshot rows, rendered as an aligned table.
+    public var latestRows: [LatestRow] = []
+    /// Per-series history outcomes, rendered as an aligned table.
+    public var historyRows: [HistoryRow] = []
     /// Lookups that failed (no data or provider error) — reported, not
     /// hidden; a silent market store is a lying market store.
     public var failures: [String] = []
@@ -196,15 +221,22 @@ public struct MarketUpdater: Sendable {
             }
             for quote in quotes {
                 data.replaceLatest(quote)
-                let asOf = quote.asOf.map(Self.stamp) ?? "unknown time"
-                report.lines.append("\(quote.symbol) \(Self.trim(quote.price)) \(quote.currency.rawValue) (as of \(asOf))")
+                report.latestRows.append(LatestRow(
+                    name: quote.symbol,
+                    price: Self.trim(quote.price),
+                    ccy: quote.currency == .unknown ? "?" : quote.currency.rawValue,
+                    asOf: quote.asOf.map(Self.stampShort) ?? "unknown time"))
             }
         }
         for currency in plan.fxCurrencies {
             do {
                 let rate = try await provider.rate(from: plan.hub, to: currency)
                 data.replaceLatest(rate)
-                report.lines.append("\(plan.hub.rawValue)/\(currency.rawValue) \(Self.trim(rate.rate))")
+                report.latestRows.append(LatestRow(
+                    name: "\(plan.hub.rawValue)/\(currency.rawValue)",
+                    price: Self.trim(rate.rate),
+                    ccy: currency.rawValue,
+                    asOf: rate.asOf.map(Self.stampShort) ?? Self.stampShort(now)))
             } catch {
                 report.failures.append("\(plan.hub.rawValue)/\(currency.rawValue) rate failed: \(error)")
             }
@@ -257,7 +289,9 @@ public struct MarketUpdater: Sendable {
             let alreadyCovered = coveredThrough.map { $0 >= windowEnd } ?? false
             if alreadyCovered {
                 report.seriesSkipped += 1
-                report.lines.append("\(symbol): history complete through \(Self.stampDay(windowEnd)) — skipped")
+                report.historyRows.append(HistoryRow(
+                    name: symbol, result: "complete — skipped",
+                    range: "through \(Self.stampDay(windowEnd))"))
                 continue
             }
 
@@ -286,10 +320,15 @@ public struct MarketUpdater: Sendable {
                 let added = data.mergeSeries(symbol: symbol, currency: fetched.currency,
                                              points: inside, through: fetchEnd)
                 report.pointsStored += added
+                let rangeText = "\(Self.stampDay(fetchStart)) … \(Self.stampDay(fetchEnd))"
                 if added == 0 {
-                    report.lines.append("\(symbol): nothing new for \(Self.stampDay(fetchStart)) … \(Self.stampDay(fetchEnd)) (already covered, no data, or not held)")
+                    report.historyRows.append(HistoryRow(
+                        name: symbol, result: "nothing new (already covered, no data, or not held)",
+                        range: rangeText))
                 } else {
-                    report.lines.append("\(symbol): +\(added) daily closes (\(Self.stampDay(fetchStart)) … \(Self.stampDay(fetchEnd)))")
+                    report.historyRows.append(HistoryRow(
+                        name: symbol, result: "+\(added) daily closes",
+                        range: rangeText))
                 }
             } catch {
                 report.failures.append("\(symbol): history fetch failed: \(error)")
@@ -311,7 +350,9 @@ public struct MarketUpdater: Sendable {
             let existing = data.series[pairKey]
             if let lastDay = existing?.coveredThrough, lastDay >= todayDay.addingTimeInterval(-86_400 * 3) {
                 report.seriesSkipped += 1
-                report.lines.append("\(pairKey): history current through \(Self.stampDay(lastDay)) — skipped")
+                report.historyRows.append(HistoryRow(
+                    name: pairKey, result: "current — skipped",
+                    range: "through \(Self.stampDay(lastDay))"))
                 continue
             }
             let fetchStart: Date
@@ -327,7 +368,9 @@ public struct MarketUpdater: Sendable {
                 let added = data.mergeSeries(symbol: pairKey, currency: currency,
                                              points: fetched.points, through: todayDay)
                 report.pointsStored += added
-                report.lines.append("\(pairKey): +\(added) daily rates (\(Self.stampDay(fetchStart)) … \(Self.stampDay(todayDay)))")
+                report.historyRows.append(HistoryRow(
+                    name: pairKey, result: "+\(added) daily rates",
+                    range: "\(Self.stampDay(fetchStart)) … \(Self.stampDay(todayDay))"))
             } catch {
                 report.failures.append("\(pairKey): history fetch failed: \(error)")
             }
@@ -346,6 +389,17 @@ public struct MarketUpdater: Sendable {
         formatter.locale = Locale(identifier: "en_US")
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    /// Compact local-time stamp for human tables ("2026-09-29 14:26").
+    /// Display only — interchange timestamps use the UTC ISO form in
+    /// JSONOutput; storage keeps reference-seconds doubles. Public so
+    /// the CLI shell renders every date column with the same ruler.
+    public static func stampShort(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return formatter.string(from: date)
     }
 

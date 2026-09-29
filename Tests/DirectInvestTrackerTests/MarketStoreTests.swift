@@ -241,7 +241,8 @@ final class MarketUpdaterTests: XCTestCase {
         let stored = data.latestQuotes.map(\.symbol).sorted()
         XCTAssertEqual(stored, ["TSLA"])
         XCTAssertEqual(data.latestRates.count, 1)
-        XCTAssertTrue(report.lines.contains { $0.contains("USD/CAD") })
+        XCTAssertTrue(report.latestRows.contains { $0.name == "USD/CAD" && $0.price == "1.4" })
+        XCTAssertTrue(report.latestRows.contains { $0.name == "TSLA" })
     }
 
     func testLatestUpdateReportsMissingQuotesLoudly() async throws {
@@ -301,7 +302,8 @@ final class MarketUpdaterTests: XCTestCase {
                            today: utc("2025-06-30"))
         let requestsLater = await provider.seriesRequestCount
         XCTAssertEqual(requestsAfter, requestsLater, "second run must not re-fetch")
-        XCTAssertTrue(report2.lines.contains { $0.contains("skipped") })
+        XCTAssertTrue(report2.historyRows.contains { $0.name == "AAPL" && $0.result.contains("skipped") })
+        XCTAssertEqual(report2.historyRows.count, report2.seriesSkipped, "every quiet series still gets a row")
         _ = report
     }
 

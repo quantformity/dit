@@ -333,6 +333,15 @@ dit market import FILE [--dry-run]     # seed real closes from a CSV
 dit market show [--symbol S] [--days N]   # inspect what the market store holds
 ```
 
+`market latest` prints one aligned price table (symbols + FX pairs,
+compact timestamps). `market show` prints two aligned tables — Latest
+snapshots and History series — and `--symbol` restricts BOTH to one
+ticker (it prints an honest "nothing stored for X" instead of empty
+tables). A `history` run that fetches nothing collapses to one summary
+line; the per-series table appears only when something actually
+happened. Display formatting only — the data and exit codes are
+unchanged.
+
 ### Derived history (`market backfill`)
 
 Some instruments (the NEO `.NE` trackers, for example) have no daily

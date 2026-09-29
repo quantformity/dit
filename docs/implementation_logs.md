@@ -361,3 +361,23 @@ and the user decides.
 - Test counts: 230 units (110 XCTest + 120 swift-testing), scenario
   e2e 130/130 (offline by design; the JSON checks assert pure-document
   stdout via python3 json parse + provenance labels as data).
+
+## 2026-09-29 — Human tables for `dit market`
+
+- `market latest` and `market history` stop printing ragged one-line
+  prose: the update engine now returns structured rows (LatestRow /
+  HistoryRow) and the CLI renders them with the shared aligned-table
+  renderer. Prices and timestamps line up column to column.
+- A `history` run where NOTHING was fetched collapses to one summary
+  line ("all N series are covered…") instead of a wall of identical
+  "skipped" rows; the table appears exactly when something happened,
+  including mixed skipped/fetched runs.
+- `market show --symbol X` now filters BOTH tables (Latest + History),
+  says "nothing stored for 'X'" honestly, and uses the compact
+  "YYYY-MM-DD HH:mm" timestamp (shared helper, local time — the
+  machine contract's UTC ISO form is unchanged).
+- `Table.render` trims trailing padding on lines whose last column is
+  left-aligned (whitespace noise in diffs/wrapping).
+- e2e +2 checks (filter narrows, filter honesty): 132/132; units
+  unchanged at 230, with three assertions moved from prose lines to
+  structured rows.

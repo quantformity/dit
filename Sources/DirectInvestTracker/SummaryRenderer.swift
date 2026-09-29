@@ -11,12 +11,17 @@ public enum Table {
             ([headers[column]] + rows.map { $0[column] }).map(\.count).max() ?? 0
         }
         func format(_ cells: [String]) -> String {
-            (0..<columns).map { column in
+            let line = (0..<columns).map { column -> String in
                 let cell = cells[column]
                 let pad = String(repeating: " ", count: widths[column] - cell.count)
                 return leftColumns.contains(column) ? cell + pad : pad + cell
             }
             .joined(separator: "  ")
+            // Trim the padding of a final left-aligned column — trailing
+            // whitespace in a "finished" line is noise (diffs, wrapping).
+            var trimmed = Substring(line)
+            while trimmed.hasSuffix(" ") { trimmed = trimmed.dropLast() }
+            return String(trimmed)
         }
         var lines = [format(headers)]
         lines.append(widths.map { String(repeating: "─", count: $0) }.joined(separator: "  "))

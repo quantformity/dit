@@ -241,6 +241,8 @@ expect_ok_match "bf: single-anchor calibration"   "calibrated on 1 common day"  
 expect_ok_match "bf: derived points marked"       "derived via TSLA"                  bf market show --symbol TSLA.NE --days 9
 expect_ok_match "bf: rerun changes nothing"       "unchanged"                          bf market backfill TSLA.NE --from TSLA --offline
 expect_ok_match "bf: as-of quote marks backfilled data"  "backfilled"                  bf quote TSLA.NE --as-of 2026-09-21
+expect_ok_match "bf: show --symbol keeps only the asked ticker" "History \\(1 series\\)"  bf market show --symbol TSLA
+expect_ok_match "bf: show --symbol is honest about unknown symbols" "nothing stored for 'GHOST'"  bf market show --symbol GHOST
 expect_ok_match "bf: as-of quote shows measured close"   "observed"                    bf quote TSLA.NE --as-of 2026-09-17
 expect_ok_match "bf: weekend as-of finds nearest earlier" "earlier"                    bf quote TSLA.NE --as-of 2026-09-20
 expect_ok_match "bf: as-of lists missing symbols"        "no stored quote for"         bf quote TSLA.NE NVDA.NE --as-of 2026-09-21
