@@ -272,3 +272,17 @@ and the user decides.
   provenance merge rules, pre-`via` document decode) → 109 XCTest +
   106 swift-testing green; scenario-e2e extended with an offline
   backfill story → 98/98.
+
+### Phase 8b follow-up: provenance flag on quotes (`dit quote --as-of`)
+
+- `dit quote SYM [--as-of DATE]` — without `--as-of` behaves exactly
+  as before (live Yahoo, Source column = provider). With `--as-of`
+  (works under `--offline`): reads the market store, no network, and
+  flags each answer `observed` (a real fetched/imported close),
+  `backfilled — derived via …` (a backfill model value), or nothing.
+  Weekend/holiday dates fall back to the nearest earlier close with an
+  "Nd earlier" marker; all-missing exits 1, partial misses are listed.
+- New `MarketData.point(onOrBefore:for:)` — the provenance-carrying
+  lookup (`price(onOrBefore:)` now delegates to it).
+- Verified live: observed Sept-17 close vs March-11 backfill vs Sunday
+  fallback vs the USD/CAD pair; scenario suite 107/107, units green.

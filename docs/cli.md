@@ -280,17 +280,33 @@ dit store import ~/Exports/tfsa.json --merge --yes
 ## Quotes
 
 ```
-dit quote <SYMBOL> [SYMBOL ...]        # live last prices (Yahoo Finance)
+dit quote <SYMBOL> [SYMBOL ...]                    # live last prices (Yahoo Finance)
+dit quote <SYMBOL> [...] --as-of YYYY-MM-DD        # the stored price for a date
 ```
 
-Prints a table (symbol, price, currency, as-of time, source). Requires
-the network — `--offline` is refused here, and a fetch failure aborts.
-Exit non-zero only when *none* of the requested symbols returned a
-quote; partial misses are listed, not an error.
+The live form requires the network — `--offline` is refused there, and
+a fetch failure aborts. Exit non-zero only when *none* of the
+requested symbols returned a quote; partial misses are listed, not an
+error.
+
+`--as-of` reads the market store (no network, works with `--offline`)
+and prints the newest close on or before that date, with a PROVENANCE
+flag telling you what the number actually is:
+
+| Provenance | Meaning |
+|---|---|
+| `observed` | a real close — fetched from Yahoo (or imported); this is a measurement |
+| `backfilled — derived via TSLA ÷ 16.2645` | NOT a quote: model output from `ticker backfill` (underlying × FX ÷ a calibrated ratio); approximates, usually within ~1% while the peg holds |
+| `(none)` / "no stored quote" | nothing known for that date and symbol (all-missing exits 1) |
+
+If the exact date has no stored price (weekend, holiday, or a gap),
+the nearest earlier one is shown with "Nd earlier" so a stale answer
+is never mistaken for that day's close.
 
 ```bash
 dit quote SHOP.TO AAPL
-dit quote BRK.B JPM
+dit quote TSLA.NE --as-of 2026-03-11          # → backfilled (labelled)
+dit quote USD/CAD --as-of 2025-01-02 --offline
 ```
 
 ## Market data — the quote store
@@ -330,9 +346,11 @@ ever touches the ledger.
   same day. Unparsable lines are reported, line-numbered.
 
 All market commands need the network (except `show` and `import`,
-which work offline); `--offline` refuses `latest` and `history`. The store is currently written-only — `dit summary`
-still fetches live quotes; reading valuation from the store
-(`--as-of`, offline-valued summaries) is the designed follow-up.
+which work offline); `--offline` refuses `latest` and `history`. The
+store is read by `dit quote --as-of` (it labels each price observed or
+backfilled); `dit summary` still values positions from live quotes —
+summary-level `--as-of` and offline valuation from this store are the
+designed follow-up.
 
 ```bash
 dit market latest

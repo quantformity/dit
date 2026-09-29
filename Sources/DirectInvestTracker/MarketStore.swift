@@ -182,12 +182,18 @@ public struct MarketData: Codable, Hashable, Sendable {
         series.removeAll()
     }
 
-    /// The lookup path a future `--as-of` valuation uses: the newest
-    /// stored observation on or before `day`.
-    public func price(onOrBefore day: Date, for symbol: String) -> Decimal? {
+    /// The lookup path `--as-of` valuation uses: the newest stored
+    /// observation on or before `day`, with provenance — a caller can
+    /// tell an observed close from a backfilled one.
+    public func point(onOrBefore day: Date, for symbol: String) -> DailyPrice? {
         guard let series = series[symbol], !series.points.isEmpty else { return nil }
         let day = DailyPrice.utcDay(day)
-        return series.points.last { $0.day <= day }?.price
+        return series.points.last { $0.day <= day }
+    }
+
+    /// The newest stored price on or before `day` (provenance elided).
+    public func price(onOrBefore day: Date, for symbol: String) -> Decimal? {
+        point(onOrBefore: day, for: symbol)?.price
     }
 }
 

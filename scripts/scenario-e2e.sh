@@ -236,6 +236,12 @@ expect_ok_match "bf: backfill derives 8 offline"  "backfilled 8 day"            
 expect_ok_match "bf: single-anchor calibration"   "calibrated on 1 common day"        bf ticker backfill TSLA.NE --from TSLA --offline
 expect_ok_match "bf: derived points marked"       "derived via TSLA"                  bf market show --symbol TSLA.NE --days 9
 expect_ok_match "bf: rerun changes nothing"       "unchanged"                          bf ticker backfill TSLA.NE --from TSLA --offline
+expect_ok_match "bf: as-of quote marks backfilled data"  "backfilled"                  bf quote TSLA.NE --as-of 2026-09-21
+expect_ok_match "bf: as-of quote shows measured close"   "observed"                    bf quote TSLA.NE --as-of 2026-09-17
+expect_ok_match "bf: weekend as-of finds nearest earlier" "earlier"                    bf quote TSLA.NE --as-of 2026-09-20
+expect_ok_match "bf: as-of lists missing symbols"        "no stored quote for"         bf quote TSLA.NE NVDA.NE --as-of 2026-09-21
+expect_ok     "bf: as-of works with --offline"           bf quote --offline TSLA.NE --as-of 2026-09-21
+expect_fail_match "bf: as-of refuses an invalid date"    2 "invalid date"              bf quote TSLA.NE --as-of 2026-13-99
 expect_fail_match "bf: --from is required"        2 "needs --from"                    bf ticker backfill TSLA.NE
 BFD2="$WORKDIR/bf2"
 mkdir -p "$BFD2/store" "$BFD2/market"
@@ -246,6 +252,7 @@ expect_ok "bf2: register underlying"       bf2 ticker add TSLA --currency USD
 expect_ok "bf2: buy tracker"               bf2 tx buy --account BF2 --ticker TSLA.NE --shares 10 --price 30 --date 2026-09-15
 expect_fail_match "bf2: refuses without stored source history (offline)" 1 "network is off" bf2 ticker backfill TSLA.NE --from TSLA --offline
 expect_fail_match "bf2: unknown source ticker refused"                   1 "no registry entry" bf2 ticker backfill TSLA.NE --from GHOST
+expect_fail_match "bf2: as-of with an empty market store exits 1"        1 "no stored quotes"  bf2 quote TSLA.NE --as-of 2026-09-21
 
 echo
 echo "================================================"

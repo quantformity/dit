@@ -889,10 +889,18 @@ enum Main {
     // MARK: - quote
 
     private static func quoteLookup(_ first: String, _ rest: [String], global: Global) async throws {
+        let options = try Options(rest, valueOptions: ["as-of"])
+        // --as-of reads the MARKET STORE instead of the network: it is
+        // the offline history path, so the offline guard below must not
+        // apply to it.
+        if let asOfRaw = options["as-of"] {
+            let asOf = try parseDate(asOfRaw)
+            try await quoteAsOf([first] + options.positionals, asOf: asOf, global: global)
+            return
+        }
         guard !global.offline else {
             throw ParseError("'dit quote' needs the network for live prices — drop --offline (offline mode exists to *avoid* fetching)")
         }
-        let options = try Options(rest)
         let positionals = [first] + options.positionals
         let symbols = try positionals.map { try requireSymbol($0) }
         guard !symbols.isEmpty else {
@@ -929,6 +937,44 @@ enum Main {
         }
         guard !bySymbol.isEmpty else {
             throw LookupError("no live quotes available for: \(symbols.joined(separator: ", "))")
+        }
+    }
+
+    /// `dit quote --as-of DATE`: the stored answer, never a fetch.
+    /// Each row shows WHERE the price came from: `observed` (a close
+    /// fetched from the provider or imported from a measured source),
+    /// `backfilled — derived via …` (a model value: underlying × FX ÷
+    /// calibrated ratio), or nothing. A date with no quote on it
+    /// reports the nearest earlier one and how far back it had to go.
+    private static func quoteAsOf(_ rawSymbols: [String], asOf: Date, global: Global) async throws {
+        let symbols = try rawSymbols.map { try requireSymbol($0) }
+        let (marketStore, configuration) = try openMarketStore(global: global)
+        let data = try await marketStore.load()
+        print("Historical quotes — \(configuration.backend.rawValue) at \(configuration.url.path)")
+        print("  as of \(shortDate(asOf)) — read from the market store, nothing fetched")
+        var rows: [[String]] = []
+        var missing: [String] = []
+        for symbol in symbols {
+            guard let point = data.point(onOrBefore: asOf, for: symbol) else {
+                rows.append([symbol, "(none)", "", "", "no stored quote"])
+                missing.append(symbol)
+                continue
+            }
+            let lag = Int(asOf.timeIntervalSince(point.day) / 86_400)
+            let onText = lag == 0 ? shortDate(point.day) : "\(shortDate(point.day)) (\(lag)d earlier)"
+            let ccy = data.series[symbol]?.currency ?? .unknown
+            let provenance = point.via == nil ? "observed" : "backfilled — \(point.via!)"
+            rows.append([symbol, trim(point.price), ccy == .unknown ? "?" : ccy.rawValue, onText, provenance])
+        }
+        for line in Table.render(headers: ["Symbol", "Price", "Ccy", "On", "Provenance"],
+                                 rows: rows, leftColumns: [0, 3, 4]) {
+            print("  \(line)")
+        }
+        if !missing.isEmpty {
+            print("no stored quote for: \(missing.joined(separator: ", ")) — 'dit market history' fills this store (backfill derived history with 'dit ticker backfill')")
+        }
+        guard missing.count < symbols.count else {
+            throw LookupError("no stored quotes for: \(symbols.joined(separator: ", ")) — the market store is empty for these; run 'dit market history'")
         }
     }
 
@@ -2302,14 +2348,27 @@ enum Main {
             """
         case ("quote", _):
             return """
-            USAGE: dit quote <SYMBOL> [SYMBOL ...]
+            USAGE: dit quote <SYMBOL> [SYMBOL ...] [--as-of DATE]
 
-              dit quote SHOP.TO AAPL     live last prices from Yahoo Finance
+              dit quote SHOP.TO AAPL           live prices from Yahoo
+              dit quote TSLA.NE --as-of 2026-05-01   the stored close
 
-              Prints a table (symbol, price, currency, as-of time, source).
-              Needs the network — --offline is refused here. Exit non-zero
-              only when *none* of the requested symbols returned a quote;
-              partial misses are listed and not an error.
+              Prints a table (symbol, price, currency, date, provenance).
+              The live form needs the network — --offline is refused
+              there. --as-of reads the market store instead (no fetch,
+              works with --offline) and labels each price by where it
+              came from: 'observed' (a close fetched or imported),
+              'backfilled — derived via …' (model output from a related
+              ticker — an approximation, not a quote), or nothing. A
+              date with no stored quote shows the nearest earlier one
+              and how many days back that was. Exit non-zero only when
+              *none* of the requested symbols has any price; partial
+              misses are listed, not an error.
+
+              EXAMPLES
+                dit quote AAPL SHOP.TO
+                dit quote TSLA.NE NVDA.NE --as-of 2026-06-15
+                dit quote USD/CAD --as-of 2025-01-02 --offline
             """
         default:
             return """
