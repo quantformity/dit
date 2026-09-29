@@ -205,17 +205,21 @@ public enum SummaryRenderer {
                     row.append(money2(holding.valueInDisplayCurrency))
                 }
                 if showDay {
-                    row.append(money2(holding.dayChange))
+                    // Money columns in this table speak the display
+                    // currency (the % right beside them is a native-
+                    // currency ratio — see the footnote); unconvertible
+                    // → dashed, never a silent native-currency leak.
+                    row.append(money2(holding.dayChangeInDisplayCurrency))
                     row.append(holding.dayChangeFraction.map(percent) ?? "—")
                 }
-                row.append(contentsOf: [money2(holding.unrealizedPnL), pnlPct,
+                row.append(contentsOf: [money2(holding.unrealizedPnLInDisplayCurrency), pnlPct,
                                         holding.accountNames.joined(separator: ", ")])
                 return row
             }
             var headers = ["Symbol", "Name", "Ccy", "Shares", "Avg cost", "Last", "Value"]
             if showConverted { headers.append("Value (\(display))") }
-            if showDay { headers.append(contentsOf: ["Day", "Day%"]) }
-            headers.append(contentsOf: ["P&L", "P&L%", "Where"])
+            if showDay { headers.append(contentsOf: ["Day (\(display))", "Day%"]) }
+            headers.append(contentsOf: ["P&L (\(display))", "P&L%", "Where"])
             lines.append(contentsOf: Table.render(
                 headers: headers,
                 rows: rows,
@@ -225,6 +229,9 @@ public enum SummaryRenderer {
 
         // --- Footnotes ---------------------------------------------------
         var allNotes = notes
+        if showConverted {
+            allNotes.append("Value (\(display)), Day (\(display)) and P&L (\(display)) are converted at the current FX rate; Day% and P&L% stay native-currency ratios so FX movement cannot masquerade as trading gain")
+        }
         if showDay {
             allNotes.append("day change = latest quote vs the previous stored close of the same ticker (a model comparison where history is derived)")
         }

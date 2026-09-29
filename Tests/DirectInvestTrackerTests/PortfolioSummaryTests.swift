@@ -360,6 +360,18 @@ struct PortfolioSummaryTests {
         let nvdaValue: Decimal = 14_952 // 60 × 178 × 1.40
         #expect(enb.valueInDisplayCurrency == enbValue)
         #expect(nvda.valueInDisplayCurrency == nvdaValue)
+
+        // The money columns also convert: −120 USD is −168 CAD at 1.40…
+        let displayLoss: Decimal = -168
+        #expect(nvda.dayChangeInDisplayCurrency == displayLoss)
+        #expect(nvda.unrealizedPnLInDisplayCurrency == displayLoss)
+        // …while CAD positions pass through unchanged (display is CAD),
+        // and the native figures remain available for the % columns.
+        let enbGain: Decimal = 80
+        #expect(enb.dayChangeInDisplayCurrency == enbGain)
+        #expect(enb.unrealizedPnLInDisplayCurrency == enbGain)
+        #expect(nvda.dayChange == nvdaChange)   // native kept alongside
+        #expect(nvda.unrealizedPnL == nvdaChange)
     }
 
     @Test func dayChangeRefusesUnpairedPrices() {
@@ -384,6 +396,15 @@ struct PortfolioSummaryTests {
         )
         #expect(s2.dayChange == nil)
         #expect(s2.holdings.allSatisfy { $0.dayChange == nil })
+
+        // With a pair but NO rate: CAD (display currency) passes through,
+        // USD dashes — the display column never leaks a native amount.
+        let paired: DayPrices = { _, _ in DayPricePair(current: 100, previous: 90) }
+        let s3 = dayPnLPortfolio.summary(lastPrice: price, dayPrices: paired)
+        let tenHundred: Decimal = 1_000
+        #expect(s3.holdings.first { $0.symbol == "ENB.TO" }!.dayChangeInDisplayCurrency == tenHundred)
+        #expect(s3.holdings.first { $0.symbol == "NVDA" }!.dayChangeInDisplayCurrency == nil)
+        #expect(s3.dayChange == nil)
     }
 
     @Test func dayChangeFromMarketSkipsTheQuoteDayItself() {

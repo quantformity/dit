@@ -315,3 +315,26 @@ and the user decides.
   mismatch-pair refusal, same-day exclusion), +3 renderer shape checks
   (mixed table, unconvertible dashes, no-history keeps old layout).
   Suite now 110 XCTest + 113 swift-testing, scenario 111/111.
+
+## 2026-09-29 (2) — Holdings money columns in the display currency
+
+- Per request, Holdings `Day` and `P&L` now show PORTFOLIO REPORTING
+  (display) currency: `Day (CAD)`/`P&L (CAD)` (dynamic with
+  `--display`), converted at the current FX rate, dashed when there is
+  no rate or no quote — never a silent native-currency leak, which the
+  old unlabeled native cells were for USD rows (a second fix of the
+  "unmarked number" problem the Value change addressed).
+- Native values stay in the model (`dayChange`, `unrealizedPnL`) and
+  feed the % columns: `Day%`/`P&L%` remain native-currency ratios by
+  deliberate contract, so FX drift never masquerades as trading gain
+  and the percent always reconciles with the native cost basis. A
+  footnote states the split whenever currencies mix. Converted money
+  + native % means a USD row's CAD P&L ≠ P&L% × cost in CAD — that is
+  intentional (FX is in the $ but not the %); documented in cli.md.
+- By-currency/Accounts `Day` columns stay per-row currency (exact
+  layer; Accounts follows each row's reporting currency like its other
+  $ columns).
+- New fields: `unrealizedPnLInDisplayCurrency`,
+  `dayChangeInDisplayCurrency` on `TickerHolding` (display layer only;
+  the exact layer is untouched). +3 assertion groups; 113+110 units,
+  111/111 scenario green; live-checked against Sept-28 closes.

@@ -28,7 +28,12 @@ public struct TickerHolding: Hashable, Sendable {
 
     /// `(quote − averageCost) × shares`, summed over the quoted
     /// underlying positions; `nil` when none of them received a quote.
+    /// Native trading currency — the exact layer P&L% is computed from.
     public let unrealizedPnL: Decimal?
+
+    /// `unrealizedPnL` converted to the display currency; `nil` when
+    /// unquoted or unconvertible. Display layer only.
+    public let unrealizedPnLInDisplayCurrency: Decimal?
 
     /// Value in ``PortfolioSummary/displayCurrency``; `nil` when no rate
     /// could convert it (or the position is already in that currency and
@@ -39,6 +44,10 @@ public struct TickerHolding: Hashable, Sendable {
     /// underlying position's previous available close. `nil` when no
     /// fresh quote pairs with an earlier observation.
     public let dayChange: Decimal?
+
+    /// `dayChange` converted to the display currency; `nil` when there
+    /// is no daily data or no rate could convert it. Display layer only.
+    public let dayChangeInDisplayCurrency: Decimal?
 
     /// `dayChange` as a fraction of the previous-close value — a price
     /// move, not a return on cost. `nil` with no daily data.
@@ -61,8 +70,10 @@ public struct TickerHolding: Hashable, Sendable {
         cost: Decimal,
         value: Decimal,
         unrealizedPnL: Decimal?,
+        unrealizedPnLInDisplayCurrency: Decimal? = nil,
         valueInDisplayCurrency: Decimal? = nil,
         dayChange: Decimal? = nil,
+        dayChangeInDisplayCurrency: Decimal? = nil,
         dayChangeFraction: Decimal? = nil,
         dayChangeModelBaseline: Bool = false,
         accountNames: [String]
@@ -74,8 +85,10 @@ public struct TickerHolding: Hashable, Sendable {
         self.averageCostPerShare = shares > 0 ? cost / shares : 0
         self.value = value
         self.unrealizedPnL = unrealizedPnL
+        self.unrealizedPnLInDisplayCurrency = unrealizedPnLInDisplayCurrency
         self.valueInDisplayCurrency = valueInDisplayCurrency
         self.dayChange = dayChange
+        self.dayChangeInDisplayCurrency = dayChangeInDisplayCurrency
         self.dayChangeFraction = dayChangeFraction
         self.dayChangeModelBaseline = dayChangeModelBaseline
         self.accountNames = accountNames
@@ -345,8 +358,12 @@ extension Portfolio {
                 cost: acc.cost,
                 value: acc.value,
                 unrealizedPnL: acc.anyQuoted ? acc.unrealized : nil,
+                unrealizedPnLInDisplayCurrency: acc.anyQuoted
+                    ? convert(acc.unrealized, from: key.currency) : nil,
                 valueInDisplayCurrency: convert(acc.value, from: key.currency),
                 dayChange: acc.anyDay ? acc.dayChange : nil,
+                dayChangeInDisplayCurrency: acc.anyDay
+                    ? convert(acc.dayChange, from: key.currency) : nil,
                 dayChangeFraction: acc.anyDay ? acc.dayFraction : nil,
                 dayChangeModelBaseline: acc.dayModel,
                 accountNames: Array(Set(acc.accountNames)).sorted()

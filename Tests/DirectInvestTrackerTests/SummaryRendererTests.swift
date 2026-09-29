@@ -184,6 +184,13 @@ struct SummaryRendererTests {
         #expect(text.contains("+2.0%"))   // ENB.TO: 40.0 → 40.8
         #expect(text.contains("-1.1%"))   // NVDA: 180 → 178
         #expect(text.contains("-120.00")) // USD account row day figure
+        // Money columns speak the display currency: NVDA's −120 USD
+        // renders as its −168 CAD equivalent in the Day and P&L cells…
+        #expect(text.contains("Day (CAD)"))
+        #expect(text.contains("P&L (CAD)"))
+        #expect(text.contains("-168.00"))
+        // …and the reconciliation contract is spelled out.
+        #expect(text.contains("Day% and P&L% stay native-currency ratios"))
         // Derived baselines are labelled, not hidden.
         #expect(text.contains("derived proxy"))
 

@@ -2186,9 +2186,13 @@ enum Main {
 
               Holdings show values in their own trading currency (with
               the code), a converted 'Value (<display>)' column when
-              currencies mix, and one-day 'Day'/'Day%' columns comparing
-              the latest quote with the previous stored close (from the
-              market store; dashed — never guessed — when unavailable).
+              currencies mix, and one-day P&L columns: 'Day (<display>)'
+              compares the latest quote with the previous stored close
+              (from the market store; dashed — never guessed — when
+              unavailable), 'Day%' the resulting native price move.
+              Money columns (Value/Day/P&L) speak the display currency;
+              % columns (Day%/P&L%) are native-currency ratios, so FX
+              movement never masquerades as trading gain.
             """
         case ("accounts", _), ("account", nil), ("account", "list"):
             return """
