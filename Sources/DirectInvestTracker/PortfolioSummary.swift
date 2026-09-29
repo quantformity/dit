@@ -108,8 +108,9 @@ public struct PortfolioSummary: Hashable, Sendable {
     /// converted sort last).
     public let accounts: [AccountBalances]
 
-    /// Open equity positions consolidated across all accounts, sorted by
-    /// value (largest first, symbol to break ties).
+    /// Open equity positions consolidated across all accounts, sorted
+    /// alphabetically by symbol (currency breaks ties when one symbol
+    /// trades in two currencies — CAD before USD).
     public let holdings: [TickerHolding]
 
     // MARK: Per-currency (exact — no conversion involved)
@@ -351,9 +352,11 @@ extension Portfolio {
                 accountNames: Array(Set(acc.accountNames)).sorted()
             )
         }
-        .sorted { left, right in
-            left.value != right.value ? left.value > right.value : left.symbol < right.symbol
-        }
+        // Alphabetical by symbol (currency to break ties): the holdings
+        // table is meant to be scanned by ticker, not by size. The sort
+        // is total — (symbol, currency) is the aggregation key — so the
+        // output is deterministic run to run.
+        .sorted { ($0.symbol, $0.currency) < ($1.symbol, $1.currency) }
 
         // Surface unmodeled short exposure (sales below zero) with the
         // account attached, sorted for stable output.

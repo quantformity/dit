@@ -153,9 +153,18 @@ struct PortfolioSummaryTests {
         let s = portfolio.summary(rate: rateStub(), lastPrice: quoteStub())
 
         #expect(s.holdings.count == 3)
+        // Alphabetical by symbol; SHOP.TO appears twice, CAD before USD.
+        #expect(s.holdings.map(\.symbol) == ["ENB.TO", "SHOP.TO", "SHOP.TO"])
 
-        // SHOP.TO appears twice: once per holding currency.
-        let shopC = s.holdings[0]
+        // ENB.TO: no quote → cost-basis value, no unrealized P&L.
+        let enb = s.holdings[0]
+        #expect(enb.symbol == "ENB.TO")
+        #expect(enb.name == "Enbridge Inc.")
+        #expect(enb.shares == 50)
+        #expect(enb.value == 2000)
+        #expect(enb.unrealizedPnL == nil)
+
+        let shopC = s.holdings[1]
         #expect(shopC.symbol == "SHOP.TO")
         #expect(shopC.name == "Shopify Inc.")
         #expect(shopC.currency == Currency.cad)
@@ -166,7 +175,7 @@ struct PortfolioSummaryTests {
         #expect(shopC.unrealizedPnL == 500)
         #expect(shopC.accountNames == ["TD Direct"])
 
-        let shopU = s.holdings[1]
+        let shopU = s.holdings[2]
         #expect(shopU.symbol == "SHOP.TO")
         #expect(shopU.currency == Currency.usd)
         #expect(shopU.shares == 60)
@@ -174,14 +183,6 @@ struct PortfolioSummaryTests {
         #expect(shopU.value == 4500)
         #expect(shopU.unrealizedPnL == 300)
         #expect(shopU.accountNames == ["Questrade"])
-
-        // ENB.TO: no quote → cost-basis value, no unrealized P&L.
-        let enb = s.holdings[2]
-        #expect(enb.symbol == "ENB.TO")
-        #expect(enb.name == "Enbridge Inc.")
-        #expect(enb.shares == 50)
-        #expect(enb.value == 2000)
-        #expect(enb.unrealizedPnL == nil)
     }
 
     @Test func sameTickerInSameCurrencyMergesAcrossAccounts() {
