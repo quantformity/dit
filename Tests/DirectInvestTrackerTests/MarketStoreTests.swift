@@ -470,6 +470,28 @@ final class MarketUpdaterTests: XCTestCase {
         XCTAssertEqual(series?.points.count, 26)
         XCTAssertEqual(report.failures, [])
     }
+
+    // MARK: Series slicing (quote --from/--to)
+
+    func testSeriesSliceIsInclusiveSortedAndOpenEnded() throws {
+        var data = MarketData()
+        data.series["AAPL"] = PriceSeries(symbol: "AAPL", currency: .usd, points: [
+            DailyPrice(day: StubMarketProvider.day("2026-09-25")!, price: 1),
+            DailyPrice(day: StubMarketProvider.day("2026-09-23")!, price: 2),
+            DailyPrice(day: StubMarketProvider.day("2026-09-24")!, price: 3),
+        ])
+        // Bounds inclusive, output sorted by day (even if the fixture
+        // arrived unsorted).
+        let slice = data.points(from: StubMarketProvider.day("2026-09-23"),
+                                to: StubMarketProvider.day("2026-09-24"),
+                                for: "AAPL")
+        XCTAssertEqual(slice.map(\.price), [2, 3])
+        // Open ends: nil … nil is the whole series; a window past the
+        // last point is EMPTY — never "the last point again".
+        XCTAssertEqual(data.points(from: nil, to: nil, for: "AAPL").count, 3)
+        XCTAssertTrue(data.points(from: StubMarketProvider.day("2026-09-26"), to: nil, for: "AAPL").isEmpty)
+        XCTAssertTrue(data.points(from: nil, to: nil, for: "GHOST").isEmpty)
+    }
 }
 
 // MARK: - Stub actor sugar (test-only convenience)

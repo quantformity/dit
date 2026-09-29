@@ -188,6 +188,30 @@ struct JSONOutputTests {
         #expect(quotes[2]["price"] is NSNull)
     }
 
+    @Test func seriesQuoteDocumentCarriesPointsAndMarkers() throws {
+        let text = JSONOutput.seriesQuotesJSON(
+            from: "2026-09-23", to: "2026-09-26", storePath: "/tmp/market",
+            rows: [
+                ("TSLA", "2026-09-23", "380.12", "USD", "observed", nil),
+                ("TSLA", "2026-09-25", "372.11", "USD", "observed", nil),
+                ("TSLA.NE", "2026-09-23", "32.7002", "CAD", "derived", "derived via TSLA ÷ 16.396"),
+                ("GHOST", nil, nil, nil, "none", nil),
+            ], pointCount: 3)
+        let doc = try #require(try JSONOutputTests.parse(text))
+        #expect(doc["schema"] as? String == "quote/1")
+        let data = try #require(doc["data"] as? [String: Any])
+        #expect(data["mode"] as? String == "series")
+        #expect(data["count"] as? Int == 3)
+        #expect(data["from"] as? String == "2026-09-23")
+        let quotes = try #require(data["quotes"] as? [[String: Any]])
+        #expect(quotes.count == 4)  // three points + one missing marker
+        #expect(quotes[0]["via"] is NSNull)
+        #expect(quotes[2]["basis"] as? String == "derived")
+        // Missing symbol is a parsed value, never a fabricated 0.00.
+        #expect(quotes[3]["price"] is NSNull)
+        #expect(quotes[3]["basis"] as? String == "none")
+    }
+
     @Test func errorEnvelopeKeepsTheSingleParsePath() throws {
         let text = JSONOutput.errorEnvelope(kind: "usage", message: "unknown option --nope")
         let doc = try #require(try JSONOutputTests.parse(text))

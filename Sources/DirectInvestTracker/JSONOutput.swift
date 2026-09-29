@@ -128,6 +128,10 @@ extension JSONOutput {
             value.map { money($0) as Any } ?? NSNull()
         }
 
+        func textOrNull(_ value: String?) -> Any {
+            value.map { $0 as Any } ?? NSNull()
+        }
+
         var totals: [String: Any] = [
             "cash": moneyOrNull(summary.cash),
             "positions": moneyOrNull(summary.positionValue),
@@ -220,10 +224,10 @@ extension JSONOutput {
                     ] as [String: Any]
                 }
                 row["quote"] = [
-                    "asOf": quote.asOf.map { isoStamp($0) } ?? NSNull(),
+                    "asOf": textOrNull(quote.asOf.map { isoStamp($0) }),
                     "price": money(quote.price),
                     "previousClose": previous,
-                    "source": quote.source ?? NSNull(),
+                    "source": textOrNull(quote.source),
                 ]
             }
             holdings.append(row)
@@ -289,7 +293,6 @@ extension JSONOutput {
         balances: AccountBalances,
         history: [(id: String, date: Date, kind: String, detail: String, currency: String)]?
     ) -> String {
-        let moneyOrNull: (Decimal?) -> Any = { $0.map { money($0) as Any } ?? NSNull() }
         var data: [String: Any] = [
             "account": [
                 "currency": account.reportingCurrency.rawValue,
@@ -394,6 +397,38 @@ extension JSONOutput {
             "mode": "store",
             "quotes": entries,
             "store": storePath,
+        ])
+    }
+
+    /// Range quotes (`dit quote SYM… --from DATE --to DATE`). One flat
+    /// list of dated points; a symbol with NO point in the range gets
+    /// a single `basis: "none"` marker instead of vanishing. `from`/
+    /// `to` echo the request (null when open-ended); `count` is the
+    /// number of points, not rows (missing markers excluded).
+    public static func seriesQuotesJSON(
+        from: String?,
+        to: String?,
+        storePath: String,
+        rows: [(symbol: String, date: String?, price: String?, ccy: String?, basis: String, via: String?)],
+        pointCount: Int
+    ) -> String {
+        let entries: [[String: Any]] = rows.map { row in
+            [
+                "basis": row.basis,
+                "ccy": row.ccy ?? NSNull(),
+                "date": row.date ?? NSNull(),
+                "price": row.price ?? NSNull(),
+                "symbol": row.symbol,
+                "via": row.via ?? NSNull(),
+            ] as [String: Any]
+        }
+        return envelope(schema: "quote/1", data: [
+            "count": pointCount,
+            "from": from ?? NSNull(),
+            "mode": "series",
+            "quotes": entries,
+            "store": storePath,
+            "to": to ?? NSNull(),
         ])
     }
 }

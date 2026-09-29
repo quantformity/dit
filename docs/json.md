@@ -47,7 +47,7 @@ no tables — even on errors.
 | `dit [--offline] --json summary` | `summary/1` |
 | `dit --json accounts` | `accounts/1` |
 | `dit --json account show NAME [--history]` | `account/1` |
-| `dit --json quote SYM… [--as-of DATE]` | `quote/1` (live / store) |
+| `dit --json quote SYM… [--as-of DATE \| --from DATE --to DATE]` | `quote/1` (live / store / series) |
 
 Everything else refuses. `--json` takes no value (`--json=1` is a
 usage error). The flag is position-independent (before or after the
@@ -221,7 +221,10 @@ data. Do not read this document as a valuation.
 - Negative `cashByCurrency` values are recorded overdrafts — real
   state, not errors.
 
-## `quote/1` — `dit --json quote SYM… [--as-of DATE]`
+## `quote/1` — `dit --json quote SYM… [--as-of DATE] [--from DATE] [--to DATE]`
+
+Three modes: live (default), store (`--as-of`), series (`--from`
+and/or `--to`).
 
 **Live mode** (default; fetches — `--offline` refuses):
 
@@ -262,6 +265,31 @@ works with `--offline`):
 - Unknown symbols are data (`basis: "none"`, `price: null`). If EVERY
   requested symbol is missing, you instead get an error envelope
   (kind `runtime`, exit 1) — total silence is not success.
+
+**Series mode** (`--from`/`--to`; also store-read, works offline):
+
+```json
+{"ok":true,"schema":"quote/1","data":{
+  "count":3,"from":"2026-09-23","mode":"series",
+  "quotes":[
+    {"basis":"observed","ccy":"USD","date":"2026-09-23","price":"380.12",
+     "symbol":"TSLA","via":null},
+    {"basis":"derived","ccy":"CAD","date":"2026-09-23","price":"32.7002",
+     "symbol":"TSLA.NE","via":"derived via TSLA ÷ 16.396"},
+    {"basis":"none","ccy":null,"date":null,"price":null,
+     "symbol":"GHOST","via":null} ],
+  "store":"/path/to/market","to":"2026-09-26"}}
+```
+
+- `quotes` is a flat list of dated points (per symbol, oldest day
+  first). `count` counts real points only — a `basis: "none"` marker
+  row is a marker, not a point.
+- `from`/`to` echo the request; `null` means that end was open
+  (`--from` alone runs to today; `--to` alone starts at the earliest
+  stored day). Bounds are INCLUSIVE.
+- A symbol with no point in the range appears once as
+  `"basis": "none"`; a range empty for EVERY symbol is an error
+  envelope (exit 1).
 
 ## Scripting notes
 

@@ -295,6 +295,7 @@ dit store import ~/Exports/tfsa.json --merge --yes
 ```
 dit quote <SYMBOL> [SYMBOL ...]                    # live last prices (Yahoo Finance)
 dit quote <SYMBOL> [...] --as-of YYYY-MM-DD        # the stored price for a date
+dit quote <SYMBOL> [...] --from DATE [--to DATE]   # the stored series, oldest first
 ```
 
 The live form requires the network — `--offline` is refused there, and
@@ -302,9 +303,13 @@ a fetch failure aborts. Exit non-zero only when *none* of the
 requested symbols returned a quote; partial misses are listed, not an
 error.
 
-`--as-of` reads the market store (no network, works with `--offline`)
-and prints the newest close on or before that date, with a PROVENANCE
-flag telling you what the number actually is:
+`--as-of` and `--from`/`--to` read the market store (no network, work
+with `--offline`) and print what is STORED with a PROVENANCE flag
+telling you what each number actually is. The range form prints every
+stored close inside the inclusive window, one table per symbol;
+`--from` alone runs to today, `--to` alone starts at the earliest
+stored day. It never invents a point for a day the store does not
+have.
 
 | Provenance | Meaning |
 |---|---|
@@ -320,6 +325,7 @@ is never mistaken for that day's close.
 dit quote SHOP.TO AAPL
 dit quote TSLA.NE --as-of 2026-03-11          # → backfilled (labelled)
 dit quote USD/CAD --as-of 2025-01-02 --offline
+dit quote TSLA TSLA.NE --from 2026-09-01 --to 2026-09-30
 ```
 
 ## Market data — the quote store

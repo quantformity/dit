@@ -247,6 +247,11 @@ expect_ok_match "bf: as-of quote shows measured close"   "observed"             
 expect_ok_match "bf: weekend as-of finds nearest earlier" "earlier"                    bf quote TSLA.NE --as-of 2026-09-20
 expect_ok_match "bf: as-of lists missing symbols"        "no stored quote for"         bf quote TSLA.NE NVDA.NE --as-of 2026-09-21
 expect_ok     "bf: as-of works with --offline"           bf quote --offline TSLA.NE --as-of 2026-09-21
+expect_ok_match "bf: range prints the stored series"       "2026-09-17"         bf quote TSLA.NE --from 2026-09-16 --to 2026-09-18
+expect_ok_match "bf: range labels derived closes"          "backfilled .* derived"  bf quote TSLA.NE --from 2026-09-15 --to 2026-09-18
+expect_ok     "bf: range works with --offline"             bf quote --offline TSLA.NE --from 2026-09-15 --to 2026-09-18
+expect_fail_match "bf: --to before --from is refused"      2 "before --from"    bf quote TSLA.NE --from 2026-09-18 --to 2026-09-15
+expect_fail_match "bf: --as-of and range conflict"         2 "cannot be combined" bf quote TSLA.NE --as-of 2026-09-17 --from 2026-09-15
 expect_fail_match "bf: as-of refuses an invalid date"    2 "invalid date"              bf quote TSLA.NE --as-of 2026-13-99
 expect_fail_match "bf: --from is required"        2 "needs --from"                    bf market backfill TSLA.NE
 BFD2="$WORKDIR/bf2"
@@ -292,6 +297,10 @@ expect_ok_match "json: store-mode quote needs no network"    '"mode":"store"'   
 expect_ok_match "json: derived baseline labelled as derived" '"basis":"derived"' bf --json quote TSLA.NE --as-of 2026-09-21
 expect_ok_match "json: observed close labelled observed"     '"basis":"observed"' bf --json quote TSLA.NE --as-of 2026-09-17
 expect_ok_match "json: missing symbol is null price, not a 0" '"basis":"none"'   bf --json quote TSLA.NE GHOST --as-of 2026-09-21
+json_ok "json: range document parses"                        bf --json quote TSLA.NE --from 2026-09-15 --to 2026-09-18
+expect_ok_match "json: range mode marker"                     '"mode":"series"'  bf --json quote TSLA.NE GHOST --from 2026-09-15 --to 2026-09-18
+expect_ok_match "json: range keeps derived provenance"        '"basis":"derived"' bf --json quote TSLA.NE --from 2026-09-15 --to 2026-09-18
+expect_fail_match "json: empty range is an error envelope"     1 '"ok":false'     bf --json quote GHOST --from 2026-09-15 --to 2026-09-18
 expect_fail_match "bf2: as-of with an empty market store exits 1"        1 "no stored quotes"  bf2 quote TSLA.NE --as-of 2026-09-21
 
 echo

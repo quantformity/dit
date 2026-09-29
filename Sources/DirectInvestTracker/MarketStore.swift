@@ -207,6 +207,22 @@ public struct MarketData: Codable, Hashable, Sendable {
     public func price(onOrBefore day: Date, for symbol: String) -> Decimal? {
         point(onOrBefore: day, for: symbol)?.price
     }
+
+    /// Every stored point with a date inside the INCLUSIVE range
+    /// (nil bound = open-ended), sorted by day. Points may arrive
+    /// unordered (fetch, import, backfill mix), so this sorts —
+    /// unlike the single-point lookups above. Empty means "nothing
+    /// stored in this range", which callers must report, not hide.
+    public func points(from: Date?, to: Date?, for symbol: String) -> [DailyPrice] {
+        guard let series = series[symbol], !series.points.isEmpty else { return [] }
+        let lo = from.map(DailyPrice.utcDay)
+        let hi = to.map(DailyPrice.utcDay)
+        return series.points
+            .filter { point in
+                (lo.map { point.day >= $0 } ?? true) && (hi.map { point.day <= $0 } ?? true)
+            }
+            .sorted { $0.day < $1.day }
+    }
 }
 
 // MARK: - Store

@@ -403,3 +403,22 @@ and the user decides.
   window; refill = full-window request, 8 gap days added, stored real
   close survives).
 - Units now 231 (111 XCTest + 120 swift-testing), scenario 132/132.
+
+## 2026-09-29 — `dit quote --from/--to`: historical series printing
+
+- `dit quote TSLA TSLA.NE --from 2026-09-01 [--to 2026-09-30]`
+  prints every STORED close in the inclusive window, one aligned
+  table per symbol (Date | Price | Provenance), oldest first. No
+  network, works with `--offline` — same store-read contract as
+  `--as-of`. `--from` alone runs to today; `--to` alone starts at
+  the earliest stored day; `--to` before `--from` and mixing
+  `--as-of` with a range are usage errors (exit 2).
+- Human output: missing symbols listed, all-missing exits 1; no
+  points are invented for empty days.
+- Machine output: `--json` gets `quote/1` mode `"series"` (flat
+  dated points, `count`, open bounds as null, missing symbol = one
+  `basis:"none"` marker) — the single-document contract holds for
+  every quote mode.
+- New: `MarketData.points(from:to:for:)` (sorted, inclusive,
+  open-ended), `JSONOutput.seriesQuotesJSON`; +3 unit tests and 9
+  scenario checks (231+3 units, 144/144 scenario).

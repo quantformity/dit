@@ -1024,13 +1024,27 @@ enum Main {
     // MARK: - quote
 
     private static func quoteLookup(_ first: String, _ rest: [String], global: Global) async throws {
-        let options = try Options(rest, valueOptions: ["as-of"])
-        // --as-of reads the MARKET STORE instead of the network: it is
-        // the offline history path, so the offline guard below must not
-        // apply to it.
+        let options = try Options(rest, valueOptions: ["as-of", "from", "to"])
+        if options["as-of"] != nil, options["from"] != nil || options["to"] != nil {
+            throw ParseError("--as-of (one point) and --from/--to (a range) cannot be combined — pick one view")
+        }
+        // --as-of (and --from/--to) read the MARKET STORE instead of
+        // the network: they are the offline history paths, so the
+        // offline guard below must not apply to them.
         if let asOfRaw = options["as-of"] {
             let asOf = try parseDate(asOfRaw)
             try await quoteAsOf([first] + options.positionals, asOf: asOf, global: global)
+            return
+        }
+        if options["from"] != nil || options["to"] != nil {
+            let fromRaw = options["from"]
+            let toRaw = options["to"]
+            let from = try fromRaw.map { try parseDate($0) }
+            let to = try toRaw.map { try parseDate($0) }
+            if let from, let to, to < from {
+                throw ParseError("--to '\(toRaw!)' is before --from '\(fromRaw!)'")
+            }
+            try await quoteRange([first] + options.positionals, from: from, to: to, global: global)
             return
         }
         guard !global.offline else {
@@ -1145,6 +1159,73 @@ enum Main {
         }
         guard missing.count < symbols.count else {
             throw LookupError("no stored quotes for: \(symbols.joined(separator: ", ")) — the market store is empty for these; run 'dit market history'")
+        }
+    }
+
+    /// `dit quote --from/--to DATE`: stored time series, never a
+    /// fetch (works offline). One section per symbol, oldest point
+    /// first, with the same provenance words as --as-of. Missing
+    /// symbols are listed, not hidden; only a run where NOTHING is
+    /// stored in range exits non-zero.
+    private static func quoteRange(_ rawSymbols: [String], from: Date?, to: Date?, global: Global) async throws {
+        let symbols = try rawSymbols.map { try requireSymbol($0) }
+        let (marketStore, configuration) = try openMarketStore(global: global)
+        let data = try await marketStore.load()
+        let toDay = to ?? DailyPrice.utcDay(Date.now)  // open-ended = up to now
+        let fromText = from.map { shortDate($0) } ?? "the beginning"
+        let toText = (to == nil ? "today (" : "") + shortDate(toDay) + (to == nil ? ")" : "")
+        let rangeText = "\(fromText) … \(toText)"
+        if global.json {
+            var rows: [(symbol: String, date: String?, price: String?, ccy: String?, basis: String, via: String?)] = []
+            var pointCount = 0
+            for symbol in symbols {
+                let points = data.points(from: from, to: toDay, for: symbol)
+                let ccy = data.series[symbol]?.currency ?? .unknown
+                if points.isEmpty {
+                    rows.append((symbol, nil, nil, nil, "none", nil))
+                    continue
+                }
+                pointCount += points.count
+                for point in points {
+                    rows.append((symbol, JSONOutput.isoDay(point.day), JSONOutput.money(point.price),
+                                 ccy == .unknown ? nil : ccy.rawValue,
+                                 point.via == nil ? "observed" : "derived", point.via))
+                }
+            }
+            guard pointCount > 0 else {
+                throw LookupError("no stored closes for: \(symbols.joined(separator: ", ")) in \(rangeText) — 'dit market history' fills this store")
+            }
+            print(JSONOutput.seriesQuotesJSON(from: from.map { JSONOutput.isoDay($0) },
+                                              to: to.map { JSONOutput.isoDay($0) },
+                                              storePath: configuration.url.path,
+                                              rows: rows, pointCount: pointCount))
+            return
+        }
+        print("Historical closes — \(configuration.backend.rawValue) at \(configuration.url.path)")
+        print("  \(rangeText) — read from the market store, nothing fetched")
+        var missing: [String] = []
+        for symbol in symbols {
+            let points = data.points(from: from, to: toDay, for: symbol)
+            guard !points.isEmpty else {
+                missing.append(symbol)
+                continue
+            }
+            let ccy = data.series[symbol]?.currency ?? .unknown
+            print("\n  \(symbol) (\(ccy == .unknown ? "?" : ccy.rawValue)) — \(points.count) close\(points.count == 1 ? "" : "s")")
+            let rows = points.map { point in
+                [shortDate(point.day), trim(point.price),
+                 point.via == nil ? "observed" : "backfilled — \(point.via!)"]
+            }
+            for line in Table.render(headers: ["Date", "Price", "Provenance"],
+                                     rows: rows, leftColumns: [0, 2]) {
+                print("    \(line)")
+            }
+        }
+        if !missing.isEmpty {
+            print("\nno stored closes for: \(missing.joined(separator: ", ")) — 'dit market history' fills this store (derive proxy history with 'dit market backfill', fill with 'dit market import')")
+        }
+        guard missing.count < symbols.count else {
+            throw LookupError("no stored closes for: \(symbols.joined(separator: ", ")) in \(rangeText) — the market store is empty for these; run 'dit market history'")
         }
     }
 
@@ -2611,19 +2692,23 @@ enum Main {
             """
         case ("quote", _):
             return """
-            USAGE: dit quote <SYMBOL> [SYMBOL ...] [--as-of DATE]
+            USAGE: dit quote <SYMBOL> [SYMBOL ...] [--as-of DATE | --from DATE --to DATE]
 
               dit quote SHOP.TO AAPL           live prices from Yahoo
               dit quote TSLA.NE --as-of 2026-05-01   the stored close
+              dit quote TSLA.NE --from 2026-09-15 --to 2026-09-25
+                                             the stored series, oldest first
 
               Prints a table (symbol, price, currency, date, provenance).
               The live form needs the network — --offline is refused
-              there. --as-of reads the market store instead (no fetch,
-              works with --offline) and labels each price by where it
-              came from: 'observed' (a close fetched or imported),
-              'backfilled — derived via …' (model output from a related
-              ticker — an approximation, not a quote), or nothing. A
-              date with no stored quote shows the nearest earlier one
+              there. --as-of and --from/--to read the market store
+              instead (no fetch, works with --offline) and label each
+              price by where it came from: 'observed' (a close fetched
+              or imported), 'backfilled — derived via …' (model output
+              from a related ticker — an approximation, not a quote),
+              or nothing. --from alone prints from that day to today;
+              --to alone prints everything up to that day. A date with
+              no stored quote (--as-of) shows the nearest earlier one
               and how many days back that was. Exit non-zero only when
               *none* of the requested symbols has any price; partial
               misses are listed, not an error.
@@ -2632,6 +2717,7 @@ enum Main {
                 dit quote AAPL SHOP.TO
                 dit quote TSLA.NE NVDA.NE --as-of 2026-06-15
                 dit quote USD/CAD --as-of 2025-01-02 --offline
+                dit quote TSLA TSLA.NE --from 2026-09-01 --to 2026-09-30 --json
             """
         default:
             return """
