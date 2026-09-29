@@ -228,3 +228,47 @@ Phase definitions live in `docs/design.md`. Newest entries last.
   only; latest prices DO work). A ticker-alias or NEO source is the
   follow-up if the 3.9%-of-portfolio NEO positions matter historically.
 - Live store filled 2026-09-28: 19 series, ~6,900 daily points in ~1.5 s.
+
+## 2026-09-28 — Phase 8b: derived history (`ticker backfill`, `market import`)
+
+The NEO answer arrived as data, not a source: `history_cache.db` proved
+.NE trackers ride their underlying × FX ÷ a fixed ratio (Sept 2026
+spread ≤ 0.85% per tracker), and TSLA.NE/GOOG.NE Jan-2025 cost bases
+agree with that model to ~3% across the whole window. NVDA.NE's does
+not (cost implies ratio 4.85 vs observed 6.31 — either an older purchase
+price or genuine decoupling), so the tool reports calibration spread
+and the user decides.
+
+- New command `dit ticker backfill <target> --from <source>
+  [--ratio R] [--dry-run]`: calibrates the ratio as the MEAN of
+  `source × FX ÷ target` over days where both were really observed
+  (stored real closes + today's live quote, deduped by day), then
+  fills weekdays without a real close inside the target's holding
+  windows as `source(close, same day) × FX(on-or-before ≤ 3d) ÷ ratio`.
+  No same-day source → the day stays honestly empty (counted, reported).
+  Same-currency derivations skip FX entirely. Calibrated spread > 2%
+  prints a decoupling warning. Works offline when the source history
+  is already stored; otherwise fetches the missing source/FX series
+  first (network required then).
+- Provenance: `DailyPrice.via` — nil means OBSERVED. Real never
+  silently coexists with derived: `merging` (provider/import path)
+  replaces derived points with real ones and refuses to let anything
+  replace a real point. Re-running backfill recomputes model points
+  (idempotent: identical inputs → "unchanged", zero writes) and keeps
+  every real close.
+- New command `dit market import FILE [--dry-run]`: CSV
+  `SYMBOL,YYYY-MM-DD,PRICE`, seeds real observations (used to load the
+  3 real .NE closes per tracker before calibrating); `market show`
+  grew a Source column and marks derived tail values.
+- Live run (after rehearsal on a full copy of the live store): seeded
+  9 real closes, then backfilled TSLA.NE/NVDA.NE/GOOG.NE — 431
+  derived days each, calibrated ratios 16.2645 / 6.315 / 8.8386, 20
+  empty weekdays per series (US market holidays — the empty-day rule
+  working). Verified 431/431 derived points match exact Decimal math
+  against the stored source series (first "mismatches" were checker
+  artifacts: float double-rounding and a stricter-than-engine FX rule).
+- Tests: `BackfillTests` 9 cases (exact-math asserts, idempotence,
+  offline refusal, fetch-when-missing asserting request ranges,
+  provenance merge rules, pre-`via` document decode) → 109 XCTest +
+  106 swift-testing green; scenario-e2e extended with an offline
+  backfill story → 98/98.

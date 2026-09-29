@@ -405,9 +405,9 @@ final class MarketUpdaterTests: XCTestCase {
 // MARK: - Stub actor sugar (test-only convenience)
 
 extension StubMarketProvider {
-    fileprivate func setLastPrices(_ values: [String: (Decimal, Currency)]) { lastPrices = values }
-    fileprivate func setDaily(_ values: [String: [(String, Decimal)]]) { daily = values }
-    fileprivate func setFailing(_ symbols: [String]) { failing = Set(symbols) }
+    func setLastPrices(_ values: [String: (Decimal, Currency)]) { lastPrices = values }
+    func setDaily(_ values: [String: [(String, Decimal)]]) { daily = values }
+    func setFailing(_ symbols: [String]) { failing = Set(symbols) }
     fileprivate var seriesRequestCount: Int { seriesRequests.count }
     fileprivate var seriesRequestSymbols: [String] { seriesRequests.map(\.symbol) }
     fileprivate var lastSeriesRequest: StubMarketProvider.Request? { seriesRequests.last }

@@ -87,6 +87,17 @@ Sources/DirectInvestTracker/
   **coverage watermark** so "fetch only what is missing" stays true
   over holidays and no-data days; history ranges come from replaying
   the ledger (a symbol is priced only on days it was held).
+- Some instruments have no daily price source at all (the .NE
+  trackers). `ticker backfill` fills those FROM a related instrument:
+  a ratio calibrated as the mean of `source × FX ÷ target` over days
+  where both were really observed, then gaps derived as
+  `source × FX ÷ ratio`. Three invariants keep this honest: every
+  synthesized point carries per-point provenance (`via` — nil means
+  observed), real observations always beat derived ones on the same
+  day (in either direction: import/fetch retires guesses), and
+  calibration spread is reported so a de-coupling tracker warns
+  instead of silently misleading. Derived data is model output
+  serving display; the ledger and cost basis never consult it.
 
 ## Command surface (target v1)
 

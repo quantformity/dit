@@ -162,8 +162,8 @@ public struct MarketUpdateReport: Sendable {
 /// The provider is injected, so the engine and its incremental rules
 /// are testable without a network.
 public struct MarketUpdater: Sendable {
-    private let provider: any PriceDataProvider
-    private let store: MarketStore
+    let provider: any PriceDataProvider
+    let store: MarketStore
 
     public init(provider: any PriceDataProvider, store: MarketStore) {
         self.provider = provider
@@ -340,7 +340,7 @@ public struct MarketUpdater: Sendable {
 
     // MARK: Helpers
 
-    private static func stamp(_ date: Date?) -> String {
+    static func stamp(_ date: Date?) -> String {
         guard let date else { return "unknown time" }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US")
@@ -349,7 +349,7 @@ public struct MarketUpdater: Sendable {
         return formatter.string(from: date)
     }
 
-    private static func stampDay(_ date: Date) -> String {
+    static func stampDay(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
@@ -357,7 +357,7 @@ public struct MarketUpdater: Sendable {
         return formatter.string(from: date)
     }
 
-    private static func trim(_ amount: Decimal) -> String {
+    static func trim(_ amount: Decimal) -> String {
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US")
         formatter.numberStyle = .decimal

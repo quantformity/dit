@@ -10,10 +10,17 @@ public struct DailyPrice: Codable, Hashable, Sendable {
     public var day: Date
     /// Close (last) price for the day, in the series currency.
     public var price: Decimal
+    /// Provenance: `nil` means this is a REAL observation (fetched or
+    /// imported). A non-nil label (e.g. `"derived via TSLA ÷ 16.209"`)
+    /// marks a model-generated value — derived data is never silently
+    /// equal to observed data, and real observations always win on the
+    /// same day.
+    public var via: String?
 
-    public init(day: Date, price: Decimal) {
+    public init(day: Date, price: Decimal, via: String? = nil) {
         self.day = DailyPrice.utcDay(day)
         self.price = price
+        self.via = via
     }
 
     /// The UTC-midnight calendar day containing `date`.
@@ -64,20 +71,31 @@ public struct PriceSeries: Codable, Hashable, Sendable {
     /// Sort + de-duplicate by day; the *last* observation for a day wins
     /// (provider order, matching `MarketDataCache`'s "newer wins" rule).
     public static func normalized(_ points: [DailyPrice]) -> [DailyPrice] {
-        var byDay: [Date: Decimal] = [:]
-        for point in points { byDay[DailyPrice.utcDay(point.day)] = point.price }
-        return byDay.sorted { $0.key < $1.key }.map { DailyPrice(day: $0.key, price: $0.value) }
+        var byDay: [Date: DailyPrice] = [:]
+        for point in points { byDay[DailyPrice.utcDay(point.day)] = point }
+        return byDay.sorted { $0.key < $1.key }.map { $0.value }
     }
 
-    /// Adds only the days the series does not already hold; stored days
-    /// keep their existing value (incremental update rule). Returns the
-    /// merged series and how many days were added.
+    /// Adds only the days the series does not already hold; stored
+    /// OBSERVED days keep their existing value (incremental update
+    /// rule), but a newly arrived real observation replaces a
+    /// previously *derived* value for the same day — models yield to
+    /// measurement. Returns the merged series and how many days were
+    /// added or had their derived value superseded.
     public func merging(_ new: [DailyPrice]) -> (series: PriceSeries, added: Int) {
-        let stored = Set(points.map(\.day))
+        var current: [Date: DailyPrice] = [:]
+        for point in points { current[point.day] = point }
         var additions: [DailyPrice] = []
         for point in new {
             let day = DailyPrice.utcDay(point.day)
-            if !stored.contains(day) { additions.append(DailyPrice(day: day, price: point.price)) }
+            let incoming = DailyPrice(day: day, price: point.price, via: point.via)
+            if let existing = current[day] {
+                // Real replaces derived; real never replaces real, and
+                // a derived value never replaces anything automatically.
+                if point.via == nil && existing.via != nil { additions.append(incoming) }
+            } else {
+                additions.append(incoming)
+            }
         }
         guard !additions.isEmpty else { return (self, 0) }
         var merged = PriceSeries(symbol: symbol, currency: currency, points: points + additions)

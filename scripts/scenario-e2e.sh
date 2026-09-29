@@ -217,6 +217,37 @@ expect_ok     "help works anywhere"                "$DIT" help
 expect_ok     "--help on a mutating command"       "$DIT" tx deposit --help
 
 echo
+echo "-- 14. Backfill derived history (offline, seeded market store) --"
+BFD="$WORKDIR/bf"
+mkdir -p "$BFD/store" "$BFD/market"
+bf() { env DIT_BACKEND=file DIT_STORE_URL="$BFD/store" DIT_MARKET_URL="$BFD/market" "$DIT" "$@"; }
+expect_ok "bf: bootstrap account"        bf account add --currency CAD --name BF
+expect_ok "bf: register tracker ticker"  bf ticker add TSLA.NE --currency CAD
+expect_ok "bf: register underlying"      bf ticker add TSLA --currency USD
+expect_ok "bf: record tracker purchase"  bf tx buy --account BF --ticker TSLA.NE --shares 10 --price 30 --date 2026-09-15
+{
+  echo "# seeded real observations"
+  for d in 15 16 17 18 21 22 23 24 25; do echo "TSLA,2026-09-$d,400"; done
+  for d in 15 16 17 18 21 22 23 24 25; do echo "USD/CAD,2026-09-$d,1.4"; done
+  echo "TSLA.NE,2026-09-17,30"
+} > "$BFD/seed.csv"
+expect_ok_match "bf: import real closes"          "TSLA.NE: 1 point"                 bf market import "$BFD/seed.csv"
+expect_ok_match "bf: backfill derives 8 offline"  "backfilled 8 day"                  bf ticker backfill TSLA.NE --from TSLA --offline
+expect_ok_match "bf: single-anchor calibration"   "calibrated on 1 common day"        bf ticker backfill TSLA.NE --from TSLA --offline
+expect_ok_match "bf: derived points marked"       "derived via TSLA"                  bf market show --symbol TSLA.NE --days 9
+expect_ok_match "bf: rerun changes nothing"       "unchanged"                          bf ticker backfill TSLA.NE --from TSLA --offline
+expect_fail_match "bf: --from is required"        2 "needs --from"                    bf ticker backfill TSLA.NE
+BFD2="$WORKDIR/bf2"
+mkdir -p "$BFD2/store" "$BFD2/market"
+bf2() { env DIT_BACKEND=file DIT_STORE_URL="$BFD2/store" DIT_MARKET_URL="$BFD2/market" "$DIT" "$@"; }
+expect_ok "bf2: bootstrap account"         bf2 account add --currency CAD --name BF2
+expect_ok "bf2: register tickers"          bf2 ticker add TSLA.NE --currency CAD
+expect_ok "bf2: register underlying"       bf2 ticker add TSLA --currency USD
+expect_ok "bf2: buy tracker"               bf2 tx buy --account BF2 --ticker TSLA.NE --shares 10 --price 30 --date 2026-09-15
+expect_fail_match "bf2: refuses without stored source history (offline)" 1 "network is off" bf2 ticker backfill TSLA.NE --from TSLA --offline
+expect_fail_match "bf2: unknown source ticker refused"                   1 "no registry entry" bf2 ticker backfill TSLA.NE --from GHOST
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"

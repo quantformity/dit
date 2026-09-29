@@ -234,8 +234,10 @@ enum Main {
             try await tickerEdit(invocation.rest, global: global)
         case ("ticker", "delete"), ("ticker", "remove"):
             try await tickerDelete(invocation.rest, global: global)
+        case ("ticker", "backfill"):
+            try await tickerBackfill(invocation.rest, global: global)
         case ("ticker", let sub?):
-            throw ParseError("unknown ticker subcommand '\(sub)' — use list, show, add, edit, or delete")
+            throw ParseError("unknown ticker subcommand '\(sub)' — use list, show, add, edit, delete, or backfill")
         case ("store", nil), ("store", "path"):
             try await storePath(global: global)
         case ("store", "export"):
@@ -256,8 +258,10 @@ enum Main {
             try await marketHistory(invocation.rest, global: global)
         case ("market", "show"):
             try await marketShow(invocation.rest, global: global)
+        case ("market", "import"):
+            try await marketImport(invocation.rest, global: global)
         case ("market", let sub?):
-            throw ParseError("unknown market subcommand '\(sub)' — use latest, history, or show (see 'dit help market')")
+            throw ParseError("unknown market subcommand '\(sub)' — use latest, history, import, or show (see 'dit help market')")
         case ("help", let topic):
             print(helpText(for: Invocation(group: topic ?? "usage", sub: nil, rest: [])))
         default:
@@ -623,6 +627,50 @@ enum Main {
         let (updated, notes) = try portfolio.removingTicker(symbol: symbol)
         try await store.save(updated)
         for note in notes { print(note) }
+    }
+
+    /// Derive the missing daily history of one ticker from another
+    /// (the .NE tracker case). Lives under `ticker` because it is
+    /// seeded from the registry + ledger, but it writes the MARKET
+    /// store — derived values carry provenance and never replace real
+    /// observations.
+    private static func tickerBackfill(_ args: [String], global: Global) async throws {
+        let options = try Options(args, valueOptions: ["from", "ratio"], flagOptions: ["dry-run"])
+        guard options.positionals.count == 1 else {
+            throw ParseError("usage: dit ticker backfill <target> --from <source> [--ratio R] [--dry-run]")
+        }
+        guard options["from"] != nil else {
+            throw ParseError("backfill needs --from SOURCE — e.g. 'dit ticker backfill TSLA.NE --from TSLA'")
+        }
+        let from = options["from"]!
+        var ratioOverride: Decimal?
+        if let raw = options["ratio"] {
+            guard let value = Decimal(string: raw), value > 0 else {
+                throw ParseError("--ratio needs a positive number (got '\(raw)')")
+            }
+            ratioOverride = value
+        }
+        let (store, configuration) = try openStore(global: global)
+        guard let portfolio = try await store.load() else {
+            throw NoPortfolio(path: configuration.url.path)
+        }
+        let (marketStore, marketConfig) = try openMarketStore(global: global)
+        let updater = MarketUpdater(provider: YahooQuoteProvider(), store: marketStore)
+        let report: MarketUpdateReport
+        do {
+            report = try await updater.backfillHistory(
+                portfolio: portfolio,
+                targetSymbol: try requireSymbol(options.positionals[0]),
+                sourceSymbol: try requireSymbol(from),
+                ratioOverride: ratioOverride,
+                allowNetwork: !global.offline,
+                dryRun: options.has("dry-run"))
+        } catch let error as DerivationError {
+            throw LookupError(error.message)
+        }
+        print("Derived history — \(marketConfig.backend.rawValue) at \(marketConfig.url.path)")
+        for line in report.lines { print("  \(line)") }
+        for failure in report.failures { printErr("warning: \(failure)") }
     }
 
     /// Comma-separated tag list ("dividend, core") → normalized tags.
@@ -1016,25 +1064,82 @@ enum Main {
         if !shownSeries.isEmpty {
             print("\nHistory (\(shownSeries.count) series):")
             let rows = shownSeries.map { key, series -> [String] in
-                [
+                var source = "observed"
+                let derived = series.points.count { $0.via != nil }
+                if derived > 0, let label = series.points.first(where: { $0.via != nil })?.via {
+                    source = "\(label) — \(derived)/\(series.points.count) pts"
+                }
+                return [
                     key,
                     series.currency == .unknown ? "?" : series.currency.rawValue,
                     "\(series.points.count)",
                     series.points.first.map { shortDate($0.day) } ?? "—",
                     series.points.last.map { shortDate($0.day) } ?? "—",
+                    source,
                 ]
             }
-            for line in Table.render(headers: ["Symbol", "Ccy", "Points", "First", "Last"],
-                                     rows: rows, leftColumns: [0, 1, 3, 4]) {
+            for line in Table.render(headers: ["Symbol", "Ccy", "Points", "First", "Last", "Source"],
+                                     rows: rows, leftColumns: [0, 1, 3, 4, 5]) {
                 print("  \(line)")
             }
             if let symbolFilter, let tailDays, let series = data.series[symbolFilter] {
                 print("\n  last \(min(tailDays, series.points.count)) close(s) for \(symbolFilter):")
                 for point in series.points.suffix(tailDays) {
-                    print("    \(shortDate(point.day))  \(trim(point.price))")
+                    print("    \(shortDate(point.day))  \(trim(point.price))\(point.via != nil ? "   (derived)" : "")")
                 }
             }
         }
+    }
+
+    /// Seed the market store from a CSV of REAL observations
+    /// (`SYMBOL,YYYY-MM-DD,PRICE`). Imported observations always win
+    /// over derived values on the same day — the import path is how
+    /// measured data (an old app's cache, a vendor file) retires the
+    /// model's guesses.
+    private static func marketImport(_ args: [String], global: Global) async throws {
+        let options = try Options(args, flagOptions: ["dry-run"])
+        guard options.positionals.count == 1 else {
+            throw ParseError("usage: dit market import <FILE> [--dry-run] — CSV lines 'SYMBOL,YYYY-MM-DD,PRICE' (# comments and blank lines skipped)")
+        }
+        let path = options.positionals[0]
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
+            throw StoreError("cannot read '\(path)' as UTF-8 text")
+        }
+        let parsed = MarketData.parseSeriesCSV(text)
+        guard !parsed.entries.isEmpty else {
+            throw LookupError("no usable 'SYMBOL,YYYY-MM-DD,PRICE' lines in '\(path)'")
+        }
+        let (marketStore, configuration) = try openMarketStore(global: global)
+        var data = try await marketStore.load()
+        print("Market import — \(configuration.backend.rawValue) at \(configuration.url.path)")
+        for problem in parsed.problems.prefix(8) { printErr("warning: \(problem)") }
+        if parsed.problems.count > 8 {
+            printErr("warning: ...and \(parsed.problems.count - 8) more unparsable line(s)")
+        }
+        var bySymbol: [String: [DailyPrice]] = [:]
+        for entry in parsed.entries {
+            bySymbol[entry.symbol, default: []].append(DailyPrice(day: entry.day, price: entry.price))
+        }
+        var totalStored = 0
+        for (symbol, points) in bySymbol.sorted(by: { $0.key < $1.key }) {
+            var currency = data.series[symbol]?.currency ?? .unknown
+            if currency == .unknown,
+               let slash = symbol.firstIndex(of: "/"),
+               let base = Currency(rawValue: String(symbol[..<slash])),
+               let quote = Currency(rawValue: String(symbol[symbol.index(after: slash)...])) {
+                currency = quote // "USD/CAD" prices CAD per 1 USD
+            }
+            let stored = data.mergeSeries(symbol: symbol, currency: currency, points: points)
+            totalStored += stored
+            print("  \(symbol): \(stored) point(s) stored from \(points.count) line(s)")
+        }
+        if options.has("dry-run") {
+            print("  dry run — nothing written")
+            return
+        }
+        data.updatedAt = .now
+        try await marketStore.save(data)
+        print("  \(totalStored) point(s) added; imported observations replace derived values on the same day")
     }
 
     // MARK: - Account reference resolution (with did-you-mean)
@@ -2115,9 +2220,18 @@ enum Main {
               dit ticker show <symbol>                  entry details + references
               dit ticker edit <symbol> [options]        update one entry
               dit ticker delete <symbol> [--yes]        remove an entry
+              dit ticker backfill <target> --from <src> [options]
 
               Options: --name NAME, --currency CCY (the currency the
               instrument trades in), --tags a,b, --notes TEXT.
+              backfill options: --from SOURCE, --ratio R (skip
+              calibration), --dry-run. It derives the missing daily
+              history of a quote-less instrument (e.g. a NEO .NE
+              tracker) from its underlying: the ratio is averaged over
+              the days where BOTH were really quoted, then past
+              prices are computed as source × FX ÷ ratio. Derived
+              values are marked as derived and never replace real
+              observations; the ledger is never touched.
               The registry is display metadata: trades for a symbol work
               with or without an entry, and deleting an entry never
               touches the ledger. Deleting an entry that transactions
@@ -2127,6 +2241,8 @@ enum Main {
                 dit ticker add BRK.B --name "Berkshire Hathaway" --currency USD
                 dit ticker edit shop.to --tags "dividend, core"
                 dit ticker list
+                dit ticker backfill TSLA.NE --from TSLA --dry-run
+                dit ticker backfill TSLA.NE --from TSLA
             """
         case ("store", _):
             return """
@@ -2163,6 +2279,8 @@ enum Main {
 
               dit market latest              refresh latest prices + FX
               dit market history [--all]     fill daily closes (incremental)
+              dit market import FILE         seed real closes (CSV:
+                                             SYMBOL,YYYY-MM-DD,PRICE)
               dit market show [--symbol S] [--days N]   what the store holds
 
               The market-data store is SEPARATE from the portfolio store:
@@ -2177,7 +2295,10 @@ enum Main {
               where the store has no data yet — re-running adds just the
               new end-of-day quotes. --all erases the daily history
               first and refetches everything (latest snapshots survive).
-              Both need the network; --offline refuses them.
+              Both need the network; --offline refuses them. 'import' and
+              'show' work offline: import stores what you measured (an
+              old app's cache, a vendor file), show marks which points
+              are real and which were derived (see 'dit ticker backfill').
             """
         case ("quote", _):
             return """

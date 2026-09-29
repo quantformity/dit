@@ -202,10 +202,38 @@ dit ticker add <symbol> [options]         # register
 dit ticker show <symbol>                  # entry details + references
 dit ticker edit <symbol> [options]        # update
 dit ticker delete <symbol> [--yes]        # remove (gated if referenced)
+dit ticker backfill <target> --from <source> [options]   # derive missing history
 ```
 
 Options: `--name NAME`, `--currency CCY` (the currency it trades in),
-`--tags a,b`, `--notes TEXT`.
+`--tags a,b`, `--notes TEXT`. Backfill options: `--from SOURCE`
+(required), `--ratio R` (skip calibration), `--dry-run`.
+
+### Derived history (`ticker backfill`)
+
+Some instruments (the NEO `.NE` trackers, for example) have no daily
+price source anywhere. If one is a fixed-ratio stand-in for a real
+underlying (`TSLA.NE` ≈ one `TSLA` share divided by a ratio, converted
+at the day's FX), you can fill its history from the underlying:
+
+```bash
+dit ticker backfill TSLA.NE --from TSLA --dry-run   # inspect first
+dit ticker backfill TSLA.NE --from TSLA             # calibrate + fill
+```
+
+The ratio is calibrated as the AVERAGE of
+`source close × FX ÷ target close` over every day where BOTH were
+really observed (stored closes plus today's live quote) — not invented.
+Gaps are then filled as `source close × the day's FX ÷ ratio`, weekdays
+only, inside the symbol's holding windows. Honesty guarantees: fills
+carry a `derived via …` provenance tag (visible in `market show`),
+real observations are never overwritten (and a future real one
+supersedes a derived value for the same day), and the calibration
+spread is reported — a wide spread means the tracker is de-coupling
+and the derived history will drift with it. This is a MODEL, and it is
+labelled as one everywhere. No network needed if the underlying's
+history is already stored (`--offline` works); otherwise it fetches
+the missing source series first.
 
 ```bash
 dit ticker add BRK.B --name "Berkshire Hathaway" --currency USD --tags "dividend, core"
@@ -270,6 +298,7 @@ dit quote BRK.B JPM
 ```
 dit market latest                      # refresh latest prices + FX for what you hold
 dit market history [--all]             # fill daily closes (incremental)
+dit market import FILE [--dry-run]     # seed real closes from a CSV
 dit market show [--symbol S] [--days N]   # inspect what the market store holds
 ```
 
@@ -290,11 +319,18 @@ ever touches the ledger.
   has no data yet. Re-running adds just the new closes; failed
   fetches are reported. `--all` erases the daily history first and
   refetches everything (latest snapshots survive).
-- `show` reads the store offline: latest table, per-series coverage,
-  and `--symbol S --days N` prints the last N closes of one series.
+- `show` reads the store offline: latest table, per-series coverage
+  (with a Source column telling you whether points are observed or
+  derived), and `--symbol S --days N` prints the last N closes of one
+  series (derived ones marked `(derived)`).
+- `import` takes a CSV of `SYMBOL,YYYY-MM-DD,PRICE` lines (one per
+  day; `#` comments and a header line are skipped) — the way to seed
+  measured history from elsewhere (an old app's cache, a vendor file).
+  Imported observations are real: they replace derived guesses for the
+  same day. Unparsable lines are reported, line-numbered.
 
-All market commands need the network (except `show`); `--offline`
-refuses them. The store is currently written-only — `dit summary`
+All market commands need the network (except `show` and `import`,
+which work offline); `--offline` refuses `latest` and `history`. The store is currently written-only — `dit summary`
 still fetches live quotes; reading valuation from the store
 (`--as-of`, offline-valued summaries) is the designed follow-up.
 
@@ -303,6 +339,7 @@ dit market latest
 dit market history
 dit market history --all
 dit market show --symbol RBLX --days 10
+dit market import old-prices.csv
 ```
 
 ## A realistic walkthrough
