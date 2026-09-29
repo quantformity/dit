@@ -43,10 +43,12 @@ missing required field).
 | `--backend file\|sqlite` | Backends: portable JSON directory, or libsqlite3 database. |
 | `--store PATH` | Where the store lives. With `file`, a directory; with `sqlite`, a database file (a directory is accepted; `portfolio.sqlite` inside it is used). |
 | `--market-store PATH` | Where the MARKET-data store lives (see `dit market`). Defaults to a `market` directory / `market.sqlite` file beside the portfolio store; env: `DIT_MARKET_URL`. |
+| `--json` | Machine-readable output for supported read commands (`summary`, `accounts`, `account show`, `quote`): stdout is exactly ONE JSON document with a stable envelope — even on errors. Other commands refuse it (exit 2). Schemas: `docs/json.md`. |
 | `-h`, `--help` | Help. `dit --help` (or `dit help`) prints the full command listing; `dit <group> --help` prints one group's commands. Takes precedence over everything in its scope. |
 
 Flags apply to the whole invocation; any order before or after the
-subcommand is fine.
+subcommand is fine. `--json` keeps exit codes unchanged (0 ok, 1
+runtime, 2 usage); parse `.ok` for the semantic result.
 
 ## Summary
 
@@ -241,38 +243,10 @@ dit ticker add <symbol> [options]         # register
 dit ticker show <symbol>                  # entry details + references
 dit ticker edit <symbol> [options]        # update
 dit ticker delete <symbol> [--yes]        # remove (gated if referenced)
-dit ticker backfill <target> --from <source> [options]   # derive missing history
 ```
 
 Options: `--name NAME`, `--currency CCY` (the currency it trades in),
-`--tags a,b`, `--notes TEXT`. Backfill options: `--from SOURCE`
-(required), `--ratio R` (skip calibration), `--dry-run`.
-
-### Derived history (`ticker backfill`)
-
-Some instruments (the NEO `.NE` trackers, for example) have no daily
-price source anywhere. If one is a fixed-ratio stand-in for a real
-underlying (`TSLA.NE` ≈ one `TSLA` share divided by a ratio, converted
-at the day's FX), you can fill its history from the underlying:
-
-```bash
-dit ticker backfill TSLA.NE --from TSLA --dry-run   # inspect first
-dit ticker backfill TSLA.NE --from TSLA             # calibrate + fill
-```
-
-The ratio is calibrated as the AVERAGE of
-`source close × FX ÷ target close` over every day where BOTH were
-really observed (stored closes plus today's live quote) — not invented.
-Gaps are then filled as `source close × the day's FX ÷ ratio`, weekdays
-only, inside the symbol's holding windows. Honesty guarantees: fills
-carry a `derived via …` provenance tag (visible in `market show`),
-real observations are never overwritten (and a future real one
-supersedes a derived value for the same day), and the calibration
-spread is reported — a wide spread means the tracker is de-coupling
-and the derived history will drift with it. This is a MODEL, and it is
-labelled as one everywhere. No network needed if the underlying's
-history is already stored (`--offline` works); otherwise it fetches
-the missing source series first.
+`--tags a,b`, `--notes TEXT`.
 
 ```bash
 dit ticker add BRK.B --name "Berkshire Hathaway" --currency USD --tags "dividend, core"
@@ -335,7 +309,7 @@ flag telling you what the number actually is:
 | Provenance | Meaning |
 |---|---|
 | `observed` | a real close — fetched from Yahoo (or imported); this is a measurement |
-| `backfilled — derived via TSLA ÷ 16.2645` | NOT a quote: model output from `ticker backfill` (underlying × FX ÷ a calibrated ratio); approximates, usually within ~1% while the peg holds |
+| `backfilled — derived via TSLA ÷ 16.2645` | NOT a quote: model output from `market backfill` (underlying × FX ÷ a calibrated ratio); approximates, usually within ~1% while the peg holds |
 | `(none)` / "no stored quote" | nothing known for that date and symbol (all-missing exits 1) |
 
 If the exact date has no stored price (weekend, holiday, or a gap),
@@ -353,9 +327,39 @@ dit quote USD/CAD --as-of 2025-01-02 --offline
 ```
 dit market latest                      # refresh latest prices + FX for what you hold
 dit market history [--all]             # fill daily closes (incremental)
+dit market backfill <target> --from <source> [--ratio R] [--dry-run]
+                                       # DERIVE missing history from a proxy
 dit market import FILE [--dry-run]     # seed real closes from a CSV
 dit market show [--symbol S] [--days N]   # inspect what the market store holds
 ```
+
+### Derived history (`market backfill`)
+
+Some instruments (the NEO `.NE` trackers, for example) have no daily
+price source anywhere. If one is a fixed-ratio stand-in for a real
+underlying (`TSLA.NE` ≈ one `TSLA` share divided by a ratio, converted
+at the day's FX), you can fill its history from the underlying:
+
+```bash
+dit market backfill TSLA.NE --from TSLA --dry-run   # inspect first
+dit market backfill TSLA.NE --from TSLA             # calibrate + fill
+```
+
+The ratio is calibrated as the AVERAGE of
+`source close × FX ÷ target close` over every day where BOTH were
+really observed (stored closes plus today's live quote) — not invented;
+`--ratio` skips calibration and uses the given constant. Gaps are then
+filled as `source close × the day's FX ÷ ratio`, weekdays only, inside
+the symbol's holding windows (replay of the ledger tells it where a
+position actually existed). Honesty guarantees: fills carry a
+`derived via …` provenance tag (visible in `market show` and in
+`--json` as `"via": …`), real observations are never overwritten (a
+future real close supersedes a derived value for the same day), and
+the calibration spread is reported — a wide spread means the tracker
+is de-coupling and the derived history will drift with it. This is a
+MODEL, and it is labelled as one everywhere. No network needed if the
+underlying's history is already stored (`--offline` works); otherwise
+it fetches the missing source series first.
 
 Price data lives in a store SEPARATE from the ledger — a `market`
 directory (file backend) or `market.sqlite` (sqlite backend) beside the

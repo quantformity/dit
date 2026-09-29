@@ -236,17 +236,17 @@ expect_ok "bf: record tracker purchase"  bf tx buy --account BF --ticker TSLA.NE
   echo "TSLA.NE,2026-09-17,30"
 } > "$BFD/seed.csv"
 expect_ok_match "bf: import real closes"          "TSLA.NE: 1 point"                 bf market import "$BFD/seed.csv"
-expect_ok_match "bf: backfill derives 8 offline"  "backfilled 8 day"                  bf ticker backfill TSLA.NE --from TSLA --offline
-expect_ok_match "bf: single-anchor calibration"   "calibrated on 1 common day"        bf ticker backfill TSLA.NE --from TSLA --offline
+expect_ok_match "bf: backfill derives 8 offline"  "backfilled 8 day"                  bf market backfill TSLA.NE --from TSLA --offline
+expect_ok_match "bf: single-anchor calibration"   "calibrated on 1 common day"        bf market backfill TSLA.NE --from TSLA --offline
 expect_ok_match "bf: derived points marked"       "derived via TSLA"                  bf market show --symbol TSLA.NE --days 9
-expect_ok_match "bf: rerun changes nothing"       "unchanged"                          bf ticker backfill TSLA.NE --from TSLA --offline
+expect_ok_match "bf: rerun changes nothing"       "unchanged"                          bf market backfill TSLA.NE --from TSLA --offline
 expect_ok_match "bf: as-of quote marks backfilled data"  "backfilled"                  bf quote TSLA.NE --as-of 2026-09-21
 expect_ok_match "bf: as-of quote shows measured close"   "observed"                    bf quote TSLA.NE --as-of 2026-09-17
 expect_ok_match "bf: weekend as-of finds nearest earlier" "earlier"                    bf quote TSLA.NE --as-of 2026-09-20
 expect_ok_match "bf: as-of lists missing symbols"        "no stored quote for"         bf quote TSLA.NE NVDA.NE --as-of 2026-09-21
 expect_ok     "bf: as-of works with --offline"           bf quote --offline TSLA.NE --as-of 2026-09-21
 expect_fail_match "bf: as-of refuses an invalid date"    2 "invalid date"              bf quote TSLA.NE --as-of 2026-13-99
-expect_fail_match "bf: --from is required"        2 "needs --from"                    bf ticker backfill TSLA.NE
+expect_fail_match "bf: --from is required"        2 "needs --from"                    bf market backfill TSLA.NE
 BFD2="$WORKDIR/bf2"
 mkdir -p "$BFD2/store" "$BFD2/market"
 bf2() { env DIT_BACKEND=file DIT_STORE_URL="$BFD2/store" DIT_MARKET_URL="$BFD2/market" "$DIT" "$@"; }
@@ -254,8 +254,42 @@ expect_ok "bf2: bootstrap account"         bf2 account add --currency CAD --name
 expect_ok "bf2: register tickers"          bf2 ticker add TSLA.NE --currency CAD
 expect_ok "bf2: register underlying"       bf2 ticker add TSLA --currency USD
 expect_ok "bf2: buy tracker"               bf2 tx buy --account BF2 --ticker TSLA.NE --shares 10 --price 30 --date 2026-09-15
-expect_fail_match "bf2: refuses without stored source history (offline)" 1 "network is off" bf2 ticker backfill TSLA.NE --from TSLA --offline
-expect_fail_match "bf2: unknown source ticker refused"                   1 "no registry entry" bf2 ticker backfill TSLA.NE --from GHOST
+expect_fail_match "bf2: refuses without stored source history (offline)" 1 "network is off" bf2 market backfill TSLA.NE --from TSLA --offline
+expect_fail_match "bf2: unknown source ticker refused"                   1 "no registry entry" bf2 market backfill TSLA.NE --from GHOST
+
+echo
+echo "-- 15. Machine output (--json) — AI-agent tooling contract --"
+# json_ok: stdout must be EXACTLY one parseable JSON document — prose
+# headers leaking in (or a table) break agents the way misaligned
+# columns break humans.
+json_ok() {
+  local name; name="$1"; shift
+  if output=$("$@" 2>/dev/null) && printf '%s\n' "$output" | python3 -c 'import json,sys; json.load(sys.stdin)' 2>/dev/null; then
+    PASS=$((PASS+1)); echo "ok   — $name"
+  else
+    FAIL=$((FAIL+1)); echo "FAIL — $name (stdout is not one pure JSON document)"
+    printf '%s\n' "$output" | sed 's/^/     | /' | head -4
+  fi
+}
+json_ok "json: offline summary is a pure JSON document"      "$DIT" --offline --json summary
+json_ok "json: accounts list parses"                          "$DIT" --json accounts
+json_ok "json: account show parses"                           "$DIT" --json account show TFSA
+json_ok "json: account show --history parses"                 "$DIT" --json account show TFSA --history
+json_ok "json: quiet account history is an empty list"        "$DIT" --json account show Quiet --history
+expect_ok_match "json: history carries FULL 36-char tx ids" '[0-9A-F]{8}-[0-9A-F]{4}-' \
+                                                           "$DIT" --json account show TFSA --history
+expect_ok_match "json: schema tag present"  '"schema":"summary/1"' "$DIT" --offline --json summary
+expect_ok_match "json: unknown data is null, never a dash"  '"dayChange":null' "$DIT" --offline --json summary
+expect_ok_match "json: money is decimal strings" '"costBasis":"[0-9]+\.[0-9]{2}"' "$DIT" --json account show TFSA
+expect_fail_match "json: unsupported command is a usage error" 2 "not supported" "$DIT" --json tx list
+expect_fail_match "json: --json takes no value"                 2 "takes no value" "$DIT" --json=1 summary
+expect_fail_match "json: all-missing as-of exits 1 WITH an envelope" 1 '"ok":false' \
+                                                           bf2 --json quote TSLA.NE --as-of 2026-09-21
+# The bf store has derived history → provenance must come through as DATA.
+expect_ok_match "json: store-mode quote needs no network"    '"mode":"store"'   bf --json quote TSLA.NE --as-of 2026-09-21
+expect_ok_match "json: derived baseline labelled as derived" '"basis":"derived"' bf --json quote TSLA.NE --as-of 2026-09-21
+expect_ok_match "json: observed close labelled observed"     '"basis":"observed"' bf --json quote TSLA.NE --as-of 2026-09-17
+expect_ok_match "json: missing symbol is null price, not a 0" '"basis":"none"'   bf --json quote TSLA.NE GHOST --as-of 2026-09-21
 expect_fail_match "bf2: as-of with an empty market store exits 1"        1 "no stored quotes"  bf2 quote TSLA.NE --as-of 2026-09-21
 
 echo

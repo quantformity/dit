@@ -338,3 +338,26 @@ and the user decides.
   `dayChangeInDisplayCurrency` on `TickerHolding` (display layer only;
   the exact layer is untouched). +3 assertion groups; 113+110 units,
   111/111 scenario green; live-checked against Sept-28 closes.
+
+## 2026-09-29 — Machine-readable output (`--json`) + `market backfill` rename
+
+- New global `--json` flag (position-independent, takes no value). For
+  `summary`, `accounts`, `account show [--history]`, and `quote
+  [--as-of]` stdout becomes exactly ONE JSON document — on success AND
+  on errors (envelope `{"ok":false,"kind":…}`); every other command
+  refuses it as a usage error (exit 2). Exit codes unchanged: 0/1/2.
+- Contract (docs/json.md, pinned by JSONOutputTests + e2e section 15):
+  financial amounts are decimal STRINGS; `null` is "no data", never
+  zero; native-currency figures and `*Display` conversions are
+  separate fields; percentages are native-currency ratios; provenance
+  is data — `via: null` means observed, non-null names the model
+  (backfill), and `quote.previousClose` is always present so
+  provenance lookup never branches on key existence. `--history`
+  carries FULL 36-char transaction ids (tables truncate to 8).
+- `dit ticker backfill` is now `dit market backfill`: the command
+  writes the market store, not the registry, so it lives with
+  `latest/history/import/show`. Old name removed (usage error), help,
+  docs, and the scenario script updated.
+- Test counts: 230 units (110 XCTest + 120 swift-testing), scenario
+  e2e 130/130 (offline by design; the JSON checks assert pure-document
+  stdout via python3 json parse + provenance labels as data).

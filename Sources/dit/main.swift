@@ -62,6 +62,7 @@ enum Main {
         var store: String?
         var marketStore: String?
         var offline = false
+        var json = false
     }
 
     private struct Invocation {
@@ -87,14 +88,23 @@ enum Main {
             }
             try await run(invocation, global: global)
         } catch let error as ParseError {
-            printErr("error: \(error.message)")
-            printErr(helpText(for: invocation))
+            // Machine mode keeps ONE parse path: failures arrive as the
+            // same-shaped JSON document on stdout, exit codes unchanged.
+            if global.json {
+                print(JSONOutput.errorEnvelope(kind: "usage", message: error.message))
+            } else {
+                printErr("error: \(error.message)")
+                printErr(helpText(for: invocation))
+            }
             exit(2)
         } catch let error as LocalizedError {
-            printErr("error: \(error.errorDescription ?? "\(error)")")
+            let message = error.errorDescription ?? "\(error)"
+            if global.json { print(JSONOutput.errorEnvelope(kind: "runtime", message: message)) }
+            else { printErr("error: \(message)") }
             exit(1)
         } catch {
-            printErr("error: \(error)")
+            if global.json { print(JSONOutput.errorEnvelope(kind: "runtime", message: "\(error)")) }
+            else { printErr("error: \(error)") }
             exit(1)
         }
     }
@@ -172,6 +182,12 @@ enum Main {
                     i += 1
                     continue
                 }
+                if key == "json" {
+                    if inline != nil { throw ParseError("--json is a flag and takes no value") }
+                    global.json = true
+                    i += 1
+                    continue
+                }
             }
             if !token.hasPrefix("-") {
                 if words.isEmpty {
@@ -201,6 +217,24 @@ enum Main {
     // MARK: - Dispatch
 
     private static func run(_ invocation: Invocation, global: Global) async throws {
+        // --json is only honored where a schema exists; anywhere else it
+        // is a usage error, never a silent fallback to table text (an
+        // agent parsing JSON must never receive prose).
+        if global.json {
+            switch (invocation.group, invocation.sub) {
+            case ("", _), ("summary", _), ("accounts", _), ("account", nil),
+                 ("account", "list"), ("account", "show"), ("quote", _):
+                break
+            default:
+                let command = ([invocation.group, invocation.sub].compactMap { $0 }
+                    .filter { !$0.isEmpty }.joined(separator: " ").isEmpty)
+                    ? "this command"
+                    : ([invocation.group, invocation.sub].compactMap { $0 }
+                        .filter { !$0.isEmpty }.joined(separator: " "))
+                throw ParseError("--json is not supported for '\(command)' — "
+                    + "documented schemas: summary, accounts, account show, quote (see docs/json.md)")
+            }
+        }
         switch (invocation.group, invocation.sub) {
         case ("", _), ("summary", _):
             try await summary(global: global)
@@ -234,10 +268,8 @@ enum Main {
             try await tickerEdit(invocation.rest, global: global)
         case ("ticker", "delete"), ("ticker", "remove"):
             try await tickerDelete(invocation.rest, global: global)
-        case ("ticker", "backfill"):
-            try await tickerBackfill(invocation.rest, global: global)
         case ("ticker", let sub?):
-            throw ParseError("unknown ticker subcommand '\(sub)' — use list, show, add, edit, delete, or backfill")
+            throw ParseError("unknown ticker subcommand '\(sub)' — use list, show, add, edit, or delete")
         case ("store", nil), ("store", "path"):
             try await storePath(global: global)
         case ("store", "export"):
@@ -256,12 +288,14 @@ enum Main {
             try await marketLatest(global: global)
         case ("market", "history"):
             try await marketHistory(invocation.rest, global: global)
+        case ("market", "backfill"):
+            try await marketBackfill(invocation.rest, global: global)
         case ("market", "show"):
             try await marketShow(invocation.rest, global: global)
         case ("market", "import"):
             try await marketImport(invocation.rest, global: global)
         case ("market", let sub?):
-            throw ParseError("unknown market subcommand '\(sub)' — use latest, history, import, or show (see 'dit help market')")
+            throw ParseError("unknown market subcommand '\(sub)' — use latest, history, backfill, import, or show (see 'dit help market')")
         case ("help", let topic):
             print(helpText(for: Invocation(group: topic ?? "usage", sub: nil, rest: [])))
         default:
@@ -274,11 +308,27 @@ enum Main {
     private static func summary(global: Global) async throws {
         let (store, configuration) = try openStore(global: global)
         guard let portfolio = try await store.load() else {
+            if global.json {
+                print(JSONOutput.envelope(schema: "summary/1", data: [
+                    "empty": true,
+                    "note": "no portfolio found — add accounts and transactions first",
+                    "store": configuration.url.path,
+                ]))
+                return
+            }
             print("No portfolio found (store: \(configuration.backend.rawValue) at \(configuration.url.path)).")
             print("Add accounts and transactions first.")
             return
         }
         if portfolio.accounts.isEmpty {
+            if global.json {
+                print(JSONOutput.summaryJSON(portfolio.summary(displayCurrency: global.display),
+                                             cache: nil, market: nil, maxAge: 0, now: Date.now,
+                                             storePath: configuration.url.path,
+                                             warnings: ["the portfolio has no accounts yet"],
+                                             offline: global.offline, degraded: global.offline))
+                return
+            }
             print("The portfolio has no accounts yet.")
             return
         }
@@ -286,6 +336,10 @@ enum Main {
         let cache = MarketDataCache()
         var notes: [String] = []
         var summary: PortfolioSummary
+        // The market store is consulted in ONLINE mode only (it powers
+        // the day-change pairs); offline and --json-offline keep their
+        // cost-basis contract with no daily data.
+        var marketData: MarketData?
 
         if global.offline {
             notes.append("offline mode: positions at cost basis, no FX conversion")
@@ -315,7 +369,6 @@ enum Main {
             // each quote is paired with that ticker's previous stored
             // close. The store is a cache — an absent or unreadable one
             // just means "no daily data", never a failed summary.
-            var marketData: MarketData?
             do {
                 let (marketStore, _) = try openMarketStore(global: global)
                 marketData = try await marketStore.load()
@@ -326,6 +379,17 @@ enum Main {
         }
         notes.append(contentsOf: untrackedShortNotes(summary))
 
+        if global.json {
+            let degraded = global.offline || notes.contains { $0.contains("fetch failed") }
+            print(JSONOutput.summaryJSON(summary,
+                                         cache: cache, market: marketData,
+                                         maxAge: 3 * 86_400, now: Date.now,
+                                         storePath: configuration.url.path,
+                                         warnings: notes,
+                                         offline: global.offline, degraded: degraded))
+            return
+        }
+
         print(SummaryRenderer.render(summary, notes: notes))
         print("")
         print("Store: \(configuration.url.path)")
@@ -334,11 +398,21 @@ enum Main {
     private static func accountsList(global: Global) async throws {
         let (store, configuration) = try openStore(global: global)
         guard let portfolio = try await store.load() else {
+            if global.json {
+                print(JSONOutput.envelope(schema: "accounts/1", data: [
+                    "accounts": [Any](), "note": "no portfolio found",
+                ]))
+                return
+            }
             print("No portfolio found (store: \(configuration.backend.rawValue) at \(configuration.url.path)).")
             print("Add accounts and transactions first.")
             return
         }
-        if portfolio.accounts.isEmpty {
+        if portfolio.accounts.isEmpty || global.json {
+            if global.json {
+                print(JSONOutput.accountsListJSON(portfolio.accounts))
+                return
+            }
             print("The portfolio has no accounts yet.")
             return
         }
@@ -373,6 +447,26 @@ enum Main {
             account: account,
             transactions: portfolio.transactions(in: account.id)
         )
+
+        if global.json {
+            // Same stable history order as the table (date, then
+            // storage order); FULL ids here — a caller can pipe them
+            // straight into 'tx show'/'tx edit'.
+            var history: [(id: String, date: Date, kind: String, detail: String, currency: String)]?
+            if options.has("history") {
+                history = portfolio.transactions(in: account.id).enumerated()
+                    .sorted { lhs, rhs in
+                        if lhs.element.date != rhs.element.date { return lhs.element.date < rhs.element.date }
+                        return lhs.offset < rhs.offset
+                    }
+                    .map { entry in
+                        (entry.element.id.uuidString, entry.element.date, entry.element.kindName,
+                         entry.element.summaryLine, entry.element.currency.rawValue)
+                    }
+            }
+            print(JSONOutput.accountJSON(account: account, balances: balances, history: history))
+            return
+        }
 
         print("Account:")
         let rows = [
@@ -671,17 +765,17 @@ enum Main {
     }
 
     /// Derive the missing daily history of one ticker from another
-    /// (the .NE tracker case). Lives under `ticker` because it is
-    /// seeded from the registry + ledger, but it writes the MARKET
-    /// store — derived values carry provenance and never replace real
-    /// observations.
-    private static func tickerBackfill(_ args: [String], global: Global) async throws {
+    /// (the .NE tracker case). Seeded from the registry + ledger, but
+    /// it WRITES the MARKET store — hence it lives under `market`
+    /// alongside history/import. Derived values carry provenance and
+    /// never replace real observations.
+    private static func marketBackfill(_ args: [String], global: Global) async throws {
         let options = try Options(args, valueOptions: ["from", "ratio"], flagOptions: ["dry-run"])
         guard options.positionals.count == 1 else {
-            throw ParseError("usage: dit ticker backfill <target> --from <source> [--ratio R] [--dry-run]")
+            throw ParseError("usage: dit market backfill <target> --from <source> [--ratio R] [--dry-run]")
         }
         guard options["from"] != nil else {
-            throw ParseError("backfill needs --from SOURCE — e.g. 'dit ticker backfill TSLA.NE --from TSLA'")
+            throw ParseError("backfill needs --from SOURCE — e.g. 'dit market backfill TSLA.NE --from TSLA'")
         }
         let from = options["from"]!
         var ratioOverride: Decimal?
@@ -956,6 +1050,19 @@ enum Main {
             throw LookupError("live quote fetch failed: \(error)")
         }
         let bySymbol = Dictionary(uniqueKeysWithValues: quotes.map { ($0.symbol, $0) })
+        if global.json {
+            guard !bySymbol.isEmpty else {
+                throw LookupError("no live quotes available for: \(symbols.joined(separator: ", "))")
+            }
+            let jsonRows = symbols.map { symbol -> (String, String?, String?, String?, String?) in
+                guard let quote = bySymbol[symbol] else { return (symbol, nil, nil, nil, nil) }
+                return (quote.symbol, JSONOutput.money(quote.price),
+                        quote.currency == .unknown ? nil : quote.currency.rawValue,
+                        quote.asOf.map { JSONOutput.isoStamp($0) }, quote.source)
+            }
+            print(JSONOutput.liveQuotesJSON(rows: jsonRows))
+            return
+        }
         let rows = symbols.map { symbol -> [String] in
             guard let quote = bySymbol[symbol] else {
                 return [symbol, "(none)", "", "", ""]
@@ -991,6 +1098,28 @@ enum Main {
         let symbols = try rawSymbols.map { try requireSymbol($0) }
         let (marketStore, configuration) = try openMarketStore(global: global)
         let data = try await marketStore.load()
+        if global.json {
+            // Machine mode: the JSON document is the ONLY thing on
+            // stdout — no prose header before it.
+            let missing = symbols.filter { data.point(onOrBefore: asOf, for: $0) == nil }
+            guard missing.count < symbols.count else {
+                throw LookupError("no stored quotes for: \(symbols.joined(separator: ", ")) — the market store is empty for these; run 'dit market history'")
+            }
+            let jsonRows = symbols.map { symbol -> (String, String?, String?, String?, Int?, String, String?) in
+                guard let point = data.point(onOrBefore: asOf, for: symbol) else {
+                    return (symbol, nil, nil, nil, nil, "none", nil)
+                }
+                let lag = Int(asOf.timeIntervalSince(point.day) / 86_400)
+                let ccy = data.series[symbol]?.currency ?? .unknown
+                return (symbol, JSONOutput.money(point.price),
+                        ccy == .unknown ? nil : ccy.rawValue,
+                        JSONOutput.isoDay(point.day), lag,
+                        point.via == nil ? "observed" : "derived", point.via)
+            }
+            print(JSONOutput.storedQuotesJSON(asOf: JSONOutput.isoDay(asOf),
+                                              storePath: configuration.url.path, rows: jsonRows))
+            return
+        }
         print("Historical quotes — \(configuration.backend.rawValue) at \(configuration.url.path)")
         print("  as of \(shortDate(asOf)) — read from the market store, nothing fetched")
         var rows: [[String]] = []
@@ -1012,7 +1141,7 @@ enum Main {
             print("  \(line)")
         }
         if !missing.isEmpty {
-            print("no stored quote for: \(missing.joined(separator: ", ")) — 'dit market history' fills this store (backfill derived history with 'dit ticker backfill')")
+            print("no stored quote for: \(missing.joined(separator: ", ")) — 'dit market history' fills this store (derive proxy history with 'dit market backfill', fill with 'dit market import')")
         }
         guard missing.count < symbols.count else {
             throw LookupError("no stored quotes for: \(symbols.joined(separator: ", ")) — the market store is empty for these; run 'dit market history'")
@@ -2169,10 +2298,14 @@ enum Main {
               dit quote <SYM> [...]      live price lookup (see: dit quote --help)
               dit help [command]         help
 
-              Global options: --display CCY, --offline, --backend file|sqlite,
-              --store PATH, --market-store PATH, -h/--help. Flags override
-              environment variables. Exit codes: 0 success, 1 runtime error,
-              2 usage error.
+              Global options: --display CCY, --offline, --json, --backend
+              file|sqlite, --store PATH, --market-store PATH, -h/--help.
+              Flags override environment variables. Exit codes: 0 success,
+              1 runtime error, 2 usage error.
+
+              Machine-readable output: 'dit --json …' prints one JSON
+              document (also for errors) for summary, accounts, account
+              show and quote — schemas and conventions in docs/json.md.
 
               Group help: dit help <group> — e.g. 'dit help account'.
             """
@@ -2327,18 +2460,9 @@ enum Main {
               dit ticker show <symbol>                  entry details + references
               dit ticker edit <symbol> [options]        update one entry
               dit ticker delete <symbol> [--yes]        remove an entry
-              dit ticker backfill <target> --from <src> [options]
 
               Options: --name NAME, --currency CCY (the currency the
               instrument trades in), --tags a,b, --notes TEXT.
-              backfill options: --from SOURCE, --ratio R (skip
-              calibration), --dry-run. It derives the missing daily
-              history of a quote-less instrument (e.g. a NEO .NE
-              tracker) from its underlying: the ratio is averaged over
-              the days where BOTH were really quoted, then past
-              prices are computed as source × FX ÷ ratio. Derived
-              values are marked as derived and never replace real
-              observations; the ledger is never touched.
               The registry is display metadata: trades for a symbol work
               with or without an entry, and deleting an entry never
               touches the ledger. Deleting an entry that transactions
@@ -2348,8 +2472,6 @@ enum Main {
                 dit ticker add BRK.B --name "Berkshire Hathaway" --currency USD
                 dit ticker edit shop.to --tags "dividend, core"
                 dit ticker list
-                dit ticker backfill TSLA.NE --from TSLA --dry-run
-                dit ticker backfill TSLA.NE --from TSLA
             """
         case ("store", _):
             return """
@@ -2386,9 +2508,21 @@ enum Main {
 
               dit market latest              refresh latest prices + FX
               dit market history [--all]     fill daily closes (incremental)
+              dit market backfill <target> --from <source> [options]
+                                             DERIVE missing history for a
+                                             quote-less tracker (e.g. a
+                                             NEO .NE proxy) from its
+                                             underlying
               dit market import FILE         seed real closes (CSV:
                                              SYMBOL,YYYY-MM-DD,PRICE)
               dit market show [--symbol S] [--days N]   what the store holds
+
+              backfill options: --from SOURCE, --ratio R (skip
+              calibration), --dry-run. The ratio is averaged over the
+              days where BOTH instruments were really quoted, then past
+              prices are computed as source × FX ÷ ratio. Derived values
+              are marked as derived and never replace real observations;
+              the ledger is never touched.
 
               The market-data store is SEPARATE from the portfolio store:
               it lives beside it (a 'market' directory or 'market.sqlite'
@@ -2405,7 +2539,7 @@ enum Main {
               Both need the network; --offline refuses them. 'import' and
               'show' work offline: import stores what you measured (an
               old app's cache, a vendor file), show marks which points
-              are real and which were derived (see 'dit ticker backfill').
+              are real and which were derived (see 'dit market backfill').
             """
         case ("quote", _):
             return """

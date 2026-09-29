@@ -88,7 +88,7 @@ Sources/DirectInvestTracker/
   over holidays and no-data days; history ranges come from replaying
   the ledger (a symbol is priced only on days it was held).
 - Some instruments have no daily price source at all (the .NE
-  trackers). `ticker backfill` fills those FROM a related instrument:
+  trackers). `market backfill` fills those FROM a related instrument:
   a ratio calibrated as the mean of `source × FX ÷ target` over days
   where both were really observed, then gaps derived as
   `source × FX ÷ ratio`. Three invariants keep this honest: every
