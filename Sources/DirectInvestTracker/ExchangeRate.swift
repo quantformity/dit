@@ -53,6 +53,22 @@ public struct ExchangeRate: Codable, Hashable, Sendable, Comparable {
         )
     }
 
+    /// Parse the display form `"BASE/QUOTE"` ("USD/CAD") into a rate
+    /// request: base buys quote. Both sides must be known ISO codes
+    /// and different; anything else returns nil and the symbol is
+    /// treated as an equity. Direction matches the stored USD-hub
+    /// series: "USD/CAD" prices CAD per 1 USD, "CAD/USD" prices
+    /// USD per 1 CAD (fetched reciprocally by the cache layer).
+    public static func pairRequest(for symbol: String) -> (from: Currency, to: Currency)? {
+        let parts = symbol.uppercased().split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              let from = Currency(rawValue: String(parts[0])),
+              let to = Currency(rawValue: String(parts[1])),
+              from != .unknown, to != .unknown, from != to
+        else { return nil }
+        return (from, to)
+    }
+
     /// The effective rate between two currencies this pair covers,
     /// reciprocating when asked for the reverse direction.
     ///

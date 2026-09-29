@@ -294,9 +294,16 @@ dit store import ~/Exports/tfsa.json --merge --yes
 
 ```
 dit quote <SYMBOL> [SYMBOL ...]                    # live last prices (Yahoo Finance)
+dit quote USD/CAD GBP/JPY                          # live FX rates (quote ccy per 1 base)
 dit quote <SYMBOL> [...] --as-of YYYY-MM-DD        # the stored price for a date
 dit quote <SYMBOL> [...] --from DATE [--to DATE]   # the stored series, oldest first
 ```
+
+FX pairs (both sides ISO codes) are answered by the rate endpoint
+when live, and by the stored FX series for `--as-of`/`--from`/`--to`.
+A pair price is QUOTE currency per 1 unit of BASE: `USD/CAD 1.4183`
+means 1 USD buys 1.4183 CAD. `CAD/USD` works too (reciprocal view of
+the same pair); mix pairs and stocks freely: `dit quote AAPL USD/CAD`.
 
 The live form requires the network — `--offline` is refused there, and
 a fetch failure aborts. Exit non-zero only when *none* of the
@@ -322,7 +329,7 @@ the nearest earlier one is shown with "Nd earlier" so a stale answer
 is never mistaken for that day's close.
 
 ```bash
-dit quote SHOP.TO AAPL
+dit quote SHOP.TO AAPL USD/CAD
 dit quote TSLA.NE --as-of 2026-03-11          # → backfilled (labelled)
 dit quote USD/CAD --as-of 2025-01-02 --offline
 dit quote TSLA TSLA.NE --from 2026-09-01 --to 2026-09-30

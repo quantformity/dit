@@ -422,3 +422,16 @@ and the user decides.
 - New: `MarketData.points(from:to:for:)` (sorted, inclusive,
   open-ended), `JSONOutput.seriesQuotesJSON`; +3 unit tests and 9
   scenario checks (231+3 units, 144/144 scenario).
+
+## 2026-09-29 — FX in `dit quote`
+
+- Live FX worked only accidentally before: "USD/CAD" was sent to the
+  equity endpoint and answered "(none)". Pairs (both sides ISO codes)
+  now route to the rate endpoint — live AND from the store — and mix
+  freely with stocks (`dit quote AAPL USD/CAD`).
+- Direction contract: a pair price is QUOTE currency per 1 BASE
+  (USD/CAD 1.4183 → 1 USD buys 1.4183 CAD); CAD/USD is the same pair
+  read reciprocally. `--json` emits FX at 6 places (rates are not
+  money — cent-rounded rates are different numbers).
+- `ExchangeRate.pairRequest(for:)` + parsing tests; docs/cli.md and
+  docs/json.md updated.

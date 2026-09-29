@@ -1057,20 +1057,42 @@ enum Main {
         }
 
         let provider = YahooQuoteProvider()
-        let quotes: [MarketQuote]
+        // FX pairs (USD/CAD) are not chart symbols: they go through the
+        // rate endpoint, prices read as quote-currency per 1 base.
+        // Everything else goes to the quotes endpoint.
+        var bySymbol: [String: MarketQuote] = [:]
+        let equity = symbols.filter { ExchangeRate.pairRequest(for: $0) == nil }
+        let pairs = symbols.filter { ExchangeRate.pairRequest(for: $0) != nil }
         do {
-            quotes = try await provider.quotes(for: symbols)
+            if !equity.isEmpty {
+                for quote in try await provider.quotes(for: equity) {
+                    bySymbol[quote.symbol] = quote
+                }
+            }
+            for pair in pairs {
+                guard let request = ExchangeRate.pairRequest(for: pair) else { continue }
+                if let rate = try? await provider.rate(from: request.from, to: request.to) {
+                    bySymbol[pair] = MarketQuote(symbol: pair, currency: request.to,
+                                                 price: rate.rate, asOf: rate.asOf,
+                                                 source: rate.source)
+                }
+                // A failed rate lookup reads as a MISS in the table;
+                // the all-missing guard still catches the loud case.
+            }
         } catch {
             throw LookupError("live quote fetch failed: \(error)")
         }
-        let bySymbol = Dictionary(uniqueKeysWithValues: quotes.map { ($0.symbol, $0) })
         if global.json {
             guard !bySymbol.isEmpty else {
                 throw LookupError("no live quotes available for: \(symbols.joined(separator: ", "))")
             }
             let jsonRows = symbols.map { symbol -> (String, String?, String?, String?, String?) in
                 guard let quote = bySymbol[symbol] else { return (symbol, nil, nil, nil, nil) }
-                return (quote.symbol, JSONOutput.money(quote.price),
+                // FX at 6 places, prices at 2 — rounding a rate to cents
+                // would silently change what the pair is worth.
+                let price = ExchangeRate.pairRequest(for: symbol) == nil
+                    ? JSONOutput.money(quote.price) : JSONOutput.rate(quote.price)
+                return (quote.symbol, price,
                         quote.currency == .unknown ? nil : quote.currency.rawValue,
                         quote.asOf.map { JSONOutput.isoStamp($0) }, quote.source)
             }
@@ -2694,7 +2716,7 @@ enum Main {
             return """
             USAGE: dit quote <SYMBOL> [SYMBOL ...] [--as-of DATE | --from DATE --to DATE]
 
-              dit quote SHOP.TO AAPL           live prices from Yahoo
+              dit quote SHOP.TO AAPL USD/CAD   live prices (FX too)
               dit quote TSLA.NE --as-of 2026-05-01   the stored close
               dit quote TSLA.NE --from 2026-09-15 --to 2026-09-25
                                              the stored series, oldest first
@@ -2706,7 +2728,10 @@ enum Main {
               price by where it came from: 'observed' (a close fetched
               or imported), 'backfilled — derived via …' (model output
               from a related ticker — an approximation, not a quote),
-              or nothing. --from alone prints from that day to today;
+              or nothing. FX pairs ("USD/CAD", both sides ISO codes)
+              are answered by the rate endpoint, live AND from the
+              store; a live pair price is quote-currency per 1 unit
+              of base. --from alone prints from that day to today;
               --to alone prints everything up to that day. A date with
               no stored quote (--as-of) shows the nearest earlier one
               and how many days back that was. Exit non-zero only when
@@ -2714,7 +2739,7 @@ enum Main {
               misses are listed, not an error.
 
               EXAMPLES
-                dit quote AAPL SHOP.TO
+                dit quote AAPL SHOP.TO USD/CAD
                 dit quote TSLA.NE NVDA.NE --as-of 2026-06-15
                 dit quote USD/CAD --as-of 2025-01-02 --offline
                 dit quote TSLA TSLA.NE --from 2026-09-01 --to 2026-09-30 --json

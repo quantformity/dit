@@ -257,6 +257,10 @@ works with `--offline`):
   MODEL output from `dit market backfill` (underlying × FX ÷ a
   calibrated ratio — an approximation while the peg holds, `via` names
   the recipe); `none`: no data exists, `price: null`.
+- FX pairs (`USD/CAD` etc.) in live mode carry the rate as a
+  6-place decimal string (money prices use 2 places — a rate rounded
+  to cents is a different number), `ccy` = quote currency, price =
+  quote per 1 base.
 - In store mode the top-level `asOf` is the REQUESTED day; each
   quote's `date` is when its price was OBSERVED, and `lagDays` says
   how stale it is. A close found earlier than the requested day is
