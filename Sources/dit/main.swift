@@ -1028,6 +1028,21 @@ enum Main {
         if options["as-of"] != nil, options["from"] != nil || options["to"] != nil {
             throw ParseError("--as-of (one point) and --from/--to (a range) cannot be combined — pick one view")
         }
+        // A 3+ currency chain (USD/CAD/HKD/EUR) is the FX matrix view:
+        // single-day only, no mixed requests, no range flags.
+        if FXMatrix.looksLikeChain(first) {
+            guard options.positionals.isEmpty else {
+                throw ParseError("an FX matrix must be the only request — quote other symbols separately")
+            }
+            if options["from"] != nil || options["to"] != nil {
+                throw ParseError("the FX matrix is single-day — use --as-of for one day, or 'dit quote USD/CAD --from … --to …' for a series")
+            }
+            guard let chain = FXMatrix.parseChain(first) else {
+                throw ParseError("unknown currency in '\(first)' — the matrix needs known ISO codes (see 'dit help quote')")
+            }
+            try await quoteMatrix(chain, token: first, asOfRaw: options["as-of"], global: global)
+            return
+        }
         // --as-of (and --from/--to) read the MARKET STORE instead of
         // the network: they are the offline history paths, so the
         // offline guard below must not apply to them.
@@ -1249,6 +1264,107 @@ enum Main {
         guard missing.count < symbols.count else {
             throw LookupError("no stored closes for: \(symbols.joined(separator: ", ")) in \(rangeText) — the market store is empty for these; run 'dit market history'")
         }
+    }
+
+    /// `dit quote USD/CAD/HKD/EUR` (3+ currencies): every pairwise
+    /// rate among them for ONE day — live (default) or from the
+    /// market store with --as-of/--offline. Ranges (--from/--to) are
+    /// refused by the caller: a matrix is single-day by design.
+    /// Anything not a direct observation is built from USD legs and
+    /// marked triangulated — never presented as a quote.
+    private static func quoteMatrix(_ currencies: [Currency], token: String,
+                                    asOfRaw: String?, global: Global) async throws {
+        let asOf: Date?
+        if let asOfRaw { asOf = try parseDate(asOfRaw) } else { asOf = nil }
+        let hub = Currency.conversionHub
+
+        // Which rate sources the matrix may probe: every chain pair
+        // (either orientation) plus each currency's USD legs —
+        // triangulation needs them even when USD is not in the chain.
+        var pairsToTry: [(Currency, Currency)] = []
+        func addPair(_ a: Currency, _ b: Currency) {
+            guard a != b,
+                  !pairsToTry.contains(where: { Set([$0.0, $0.1]) == Set([a, b]) })
+            else { return }
+            pairsToTry.append((a, b))
+        }
+        for a in currencies { for b in currencies { addPair(a, b) } }
+        for currency in currencies { addPair(hub, currency) }
+
+        // Gather rates BEFORE building, so FXMatrix stays a synchronous
+        // pure function over "what was observed where".
+        var direct: [String: (rate: Decimal, date: String?)] = [:]
+        func key(_ a: Currency, _ b: Currency) -> String { "\(a.rawValue)/\(b.rawValue)" }
+        let storeMode = global.offline || asOf != nil
+        var storePath = "yahoo finance"
+
+        if storeMode {
+            // Single day from the market store, never a fetch.
+            let (marketStore, configuration) = try openMarketStore(global: global)
+            storePath = configuration.url.path
+            let data = try await marketStore.load()
+            let day = asOf ?? Date.now
+            for (a, b) in pairsToTry {
+                if let point = data.point(onOrBefore: day, for: key(a, b)) {
+                    direct[key(a, b)] = (point.price, shortDate(point.day))
+                }
+            }
+        } else {
+            let provider = YahooQuoteProvider()
+            for (a, b) in pairsToTry {
+                // Try the pair; if the provider has only the reverse
+                // quote, take it — the builder inverts it explicitly.
+                if let rate = try? await provider.rate(from: a, to: b) {
+                    direct[key(a, b)] = (rate.rate, nil)
+                } else if let reverse = try? await provider.rate(from: b, to: a) {
+                    direct[key(b, a)] = (reverse.rate, nil)
+                }
+            }
+        }
+
+        let cells = FXMatrix.cells(currencies: currencies) { a, b in direct[key(a, b)] }
+        guard cells.contains(where: { $0.rate != nil }) else {
+            throw LookupError(storeMode
+                ? "no stored FX rates for \(token) in the market store — 'dit market latest' fetches them live"
+                : "no FX rates available for \(token) — check the network, or seed the store with 'dit market import'")
+        }
+
+        if global.json {
+            print(JSONOutput.matrixJSON(token: token, currencies: currencies, cells: cells,
+                                        storePath: storePath, storeMode: storeMode,
+                                        asOf: asOf.map { shortDate($0) }, now: Date.now))
+            return
+        }
+
+        print("FX matrix — \(token)")
+        print("  every rate is QUOTE currency (column) per 1 unit of the row BASE")
+        if storeMode {
+            print("  \(asOf.map { shortDate($0) } ?? "latest stored rates") — read from the market store, nothing fetched")
+        } else {
+            print("  live from Yahoo Finance at \(quoteStamp(Date.now))")
+        }
+        let byPair = Dictionary(uniqueKeysWithValues: cells.map { ("\($0.base.rawValue)\u{0}\($0.quote.rawValue)", $0) })
+        var rows: [[String]] = []
+        for base in currencies {
+            var row = [base.rawValue]
+            for quote in currencies {
+                if base == quote { row.append("·"); continue }
+                guard let cell = byPair["\(base.rawValue)\u{0}\(quote.rawValue)"], let rate = cell.rate else {
+                    row.append("—")
+                    continue
+                }
+                row.append(JSONOutput.rate(rate) + (cell.basis == "derived" ? "*" : ""))
+            }
+            rows.append(row)
+        }
+        print()
+        for line in Table.render(headers: ["Base \\ to"] + currencies.map(\.rawValue),
+                                 rows: rows, leftColumns: [0]) {
+            print("  \(line)")
+        }
+        print()
+        print("  · = same currency · — = no rate available · * = triangulated via USD")
+        print("    (triangulated rates are approximations from two USD legs, not quotes)")
     }
 
     // MARK: - market commands (the separate market-data store)
@@ -2715,6 +2831,7 @@ enum Main {
         case ("quote", _):
             return """
             USAGE: dit quote <SYMBOL> [SYMBOL ...] [--as-of DATE | --from DATE --to DATE]
+                   dit quote CCY/CCY/CCY[/...] [--as-of DATE]        FX matrix
 
               dit quote SHOP.TO AAPL USD/CAD   live prices (FX too)
               dit quote TSLA.NE --as-of 2026-05-01   the stored close
@@ -2738,10 +2855,21 @@ enum Main {
               *none* of the requested symbols has any price; partial
               misses are listed, not an error.
 
+              A chain of 3+ currencies (USD/CAD/HKD/EUR) prints the
+              FX MATRIX instead: one table, every pairwise rate, each
+              cell quoting the row's base. Rates the source does not
+              publish directly are triangulated through USD and marked
+              '*' — approximations, labelled as such, never posed as
+              quotes. Single-day by design: --as-of picks the day
+              (plain = live now, --offline = latest stored); --from/
+              --to are refused. The matrix must be the only request.
+
               EXAMPLES
                 dit quote AAPL SHOP.TO USD/CAD
                 dit quote TSLA.NE NVDA.NE --as-of 2026-06-15
                 dit quote USD/CAD --as-of 2025-01-02 --offline
+                dit quote USD/CAD/HKD/EUR
+                dit quote USD/CAD/HKD/EUR --as-of 2026-09-25 --offline
                 dit quote TSLA TSLA.NE --from 2026-09-01 --to 2026-09-30 --json
             """
         default:

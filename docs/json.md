@@ -48,6 +48,7 @@ no tables — even on errors.
 | `dit --json accounts` | `accounts/1` |
 | `dit --json account show NAME [--history]` | `account/1` |
 | `dit --json quote SYM… [--as-of DATE \| --from DATE --to DATE]` | `quote/1` (live / store / series) |
+| `dit --json quote CCY/CCY/CCY[/…] [--as-of DATE]` | `quote/1` (`"mode":"matrix"`) |
 
 Everything else refuses. `--json` takes no value (`--json=1` is a
 usage error). The flag is position-independent (before or after the
@@ -294,6 +295,44 @@ works with `--offline`):
 - A symbol with no point in the range appears once as
   `"basis": "none"`; a range empty for EVERY symbol is an error
   envelope (exit 1).
+
+**Matrix mode** (3+ currency chain, single day — `--from`/`--to`
+refused with exit 2). Example (`--as-of`, store-read):
+
+```json
+{"ok":true,"schema":"quote/1","data":{
+  "asOf":"2026-09-28","count":6,"currencies":["USD","CAD","HKD"],
+  "mode":"matrix","pairCount":6,"query":"USD/CAD/HKD",
+  "rates":[
+    {"base":"USD","basis":"observed","date":"2026-09-28","quote":"CAD",
+     "rate":"1.418300"},
+    {"base":"CAD","basis":"reciprocal","date":"2026-09-28","quote":"USD",
+     "rate":"0.705069"},
+    {"base":"CAD","basis":"derived","quote":"HKD","rate":"5.527744",
+     "via":"triangulated via USD"},
+    {"base":"HKD","basis":"reciprocal","date":"2026-09-28","quote":"USD",
+     "rate":"0.127551"} ],
+  "store":"/path/to/market"}}
+```
+
+(excerpt — a 3-currency chain has 6 rate entries; the two triangulated
+CAD↔HKD rows are elided. A `"basis": "none"` entry, `"rate": null`,
+appears when neither a direct pair nor both USD legs are known)
+
+- `rates` carries every DIRECTIONAL pair (n×(n−1) entries, no
+  diagonal); `pairCount` = entries, `count` = entries that actually
+  have a rate. Rates are 6-place strings, quote-ccy per 1 base.
+- `basis`: `observed` (direct quote/series, has `date` in store mode)
+  → `reciprocal` (exact inversion of the observed reverse pair — same
+  measurement, other direction) → `derived` (triangulated through two
+  USD legs, carries `"via": "triangulated via USD"`, no date: it is
+  a model number, not a quote) → `none` (`"rate": null`, no
+  invention).
+- `asOf`: requested day (store) or fetch stamp (live); `null` for
+  plain `--offline` ("latest stored"). Unknown codes inside the chain
+  and mixing the chain with other requests are usage errors (exit 2,
+  error envelope under `--json`); a chain where NOT one rate is known
+  is a runtime error (exit 1).
 
 ## Scripting notes
 

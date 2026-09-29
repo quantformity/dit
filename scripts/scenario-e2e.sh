@@ -304,6 +304,37 @@ expect_fail_match "json: empty range is an error envelope"     1 '"ok":false'   
 expect_fail_match "bf2: as-of with an empty market store exits 1"        1 "no stored quotes"  bf2 quote TSLA.NE --as-of 2026-09-21
 
 echo
+echo "-- 16. FX matrix (dit quote USD/CAD/HKD/EUR) — single day, no invention --"
+# All matrix checks stay offline: the matrix must be answerable from
+# the store, and refusals happen before any network question.
+MTX="$WORKDIR/mtx"
+mkdir -p "$MTX/store" "$MTX/market"
+mtx() { env DIT_BACKEND=file DIT_STORE_URL="$MTX/store" DIT_MARKET_URL="$MTX/market" "$DIT" "$@"; }
+MTX2="$WORKDIR/mtx2"
+mkdir -p "$MTX2/store" "$MTX2/market"
+mtx2() { env DIT_BACKEND=file DIT_STORE_URL="$MTX2/store" DIT_MARKET_URL="$MTX2/market" "$DIT" "$@"; }
+{
+  echo "# hub rates: column-ccy per 1 USD, one day only"
+  echo "USD/CAD,2026-09-25,1.4"
+  echo "USD/HKD,2026-09-25,7.84"
+  echo "USD/EUR,2026-09-25,0.93"
+} > "$WORKDIR/fx.csv"
+expect_ok   "matrix: seed hub rates"                          mtx market import "$WORKDIR/fx.csv"
+expect_ok_match "matrix: triangulated CAD→HKD is 7.84 ÷ 1.4"  "5\.6"           mtx quote USD/CAD/HKD --as-of 2026-09-28
+expect_ok_match "matrix: triangulation is marked, not hidden" '\*'             mtx quote USD/CAD/HKD --as-of 2026-09-28
+expect_ok_match "matrix: the legend explains the marker"      "triangulated via USD"  mtx quote USD/CAD/HKD --as-of 2026-09-28
+expect_ok_match "matrix: plain --offline takes the latest stored day" "5\.6"   mtx quote --offline USD/CAD/HKD
+json_ok     "matrix: json is one pure document"               mtx --json quote USD/CAD/HKD --as-of 2026-09-28
+expect_ok_match "matrix: json mode + derived rows"            '"mode":"matrix"' mtx --json quote USD/CAD/HKD --as-of 2026-09-28
+expect_ok_match "matrix: json derived row says how it was made" 'triangulated via USD' mtx --json quote USD/CAD/HKD --as-of 2026-09-28
+expect_fail_match "matrix: --from is refused (single-day view)" 2 "single-day"      mtx quote USD/CAD/HKD --from 2026-09-01
+expect_fail_match "matrix: --to is refused too"                  2 "single-day"     mtx quote USD/CAD/HKD --to 2026-09-28
+expect_fail_match "matrix: cannot be mixed with other requests"  2 "only request"   mtx quote USD/CAD/HKD TSLA
+expect_fail_match "matrix: unknown code in a chain is a usage error" 2 "unknown currency" mtx quote USD/CAD/XYZ --offline
+expect_fail_match "matrix: no known rate = error, not a table of dashes" 1 "no stored FX rates" mtx2 quote USD/CAD/HKD --offline
+expect_fail_match "matrix: json form keeps the error envelope"  1 '"ok":false'      mtx2 --json quote USD/CAD/HKD --offline
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"

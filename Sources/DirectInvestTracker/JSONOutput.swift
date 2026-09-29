@@ -431,4 +431,36 @@ extension JSONOutput {
             "to": to ?? NSNull(),
         ])
     }
+
+    /// FX matrix (`dit quote USD/CAD/HKD/EUR`, single day). `rates`
+    /// carries every directional pair; `basis` tells observed from
+    /// reciprocal and triangulated ("derived", with `via`) from
+    /// unknown ("none", rate null). `count` counts only rates that
+    /// exist — "none" rows are markers, never zeros.
+    public static func matrixJSON(token: String, currencies: [Currency],
+                                  cells: [FXMatrix.Cell], storePath: String,
+                                  storeMode: Bool, asOf: String?, now: Date) -> String {
+        let entries: [[String: Any]] = cells.map { cell in
+            var entry: [String: Any] = [
+                "base": cell.base.rawValue,
+                "basis": cell.basis,
+                "quote": cell.quote.rawValue,
+                "rate": cell.rate.map { rate($0) as Any } ?? NSNull(),
+            ]
+            if let date = cell.date { entry["date"] = date }
+            if cell.basis == "derived" { entry["via"] = "triangulated via USD" }
+            return entry
+        }
+        var data: [String: Any] = [
+            "count": cells.filter { $0.rate != nil }.count,
+            "currencies": currencies.map(\.rawValue),
+            "mode": "matrix",
+            "pairCount": cells.count,
+            "query": token,
+            "rates": entries,
+            "store": storePath,
+        ]
+        data["asOf"] = storeMode ? (asOf ?? NSNull()) : isoStamp(now)
+        return envelope(schema: "quote/1", data: data)
+    }
 }

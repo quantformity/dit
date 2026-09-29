@@ -297,6 +297,7 @@ dit quote <SYMBOL> [SYMBOL ...]                    # live last prices (Yahoo Fin
 dit quote USD/CAD GBP/JPY                          # live FX rates (quote ccy per 1 base)
 dit quote <SYMBOL> [...] --as-of YYYY-MM-DD        # the stored price for a date
 dit quote <SYMBOL> [...] --from DATE [--to DATE]   # the stored series, oldest first
+dit quote USD/CAD/HKD[/...] [--as-of DATE]         # FX MATRIX (single day only)
 ```
 
 FX pairs (both sides ISO codes) are answered by the rate endpoint
@@ -309,6 +310,20 @@ The live form requires the network — `--offline` is refused there, and
 a fetch failure aborts. Exit non-zero only when *none* of the
 requested symbols returned a quote; partial misses are listed, not an
 error.
+
+**FX matrix** — a chain of 3+ ISO codes (`USD/CAD/HKD/EUR`, one
+argument) prints ONE table of every pairwise rate instead of per-
+symbol lines. Each cell is the column currency per 1 unit of the row
+base. Rates come directly from the source when it publishes the cross
+(live Yahoo usually does); anything else is triangulated through the
+two USD legs and marked `*` — a labelled approximation, never posed
+as a quote. Reciprocals of observed quotes print unmarked (exact
+inversions). The matrix is **single-day only**: `--as-of DATE` reads
+one day from the store, plain means live now, `--offline` takes the
+latest stored rates. `--from`/`--to` are refused (exit 2), and the
+matrix must be the only request. Exit 1 when not a single rate is
+known for the chain. Unknown codes inside a chain are a usage error
+(`USD/CAD/XYZ` → exit 2), not a silent miss.
 
 `--as-of` and `--from`/`--to` read the market store (no network, work
 with `--offline`) and print what is STORED with a PROVENANCE flag
@@ -333,6 +348,8 @@ dit quote SHOP.TO AAPL USD/CAD
 dit quote TSLA.NE --as-of 2026-03-11          # → backfilled (labelled)
 dit quote USD/CAD --as-of 2025-01-02 --offline
 dit quote TSLA TSLA.NE --from 2026-09-01 --to 2026-09-30
+dit quote USD/CAD/HKD/EUR                     # live matrix
+dit quote USD/CAD/HKD/EUR --as-of 2026-09-25  # one stored day
 ```
 
 ## Market data — the quote store
