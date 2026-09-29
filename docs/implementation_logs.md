@@ -381,3 +381,10 @@ and the user decides.
 - e2e +2 checks (filter narrows, filter honesty): 132/132; units
   unchanged at 230, with three assertions moved from prose lines to
   structured rows.
+- Follow-up (same day, per request): `market history` now ends with a
+  COVERAGE table — Ticker / Earliest / Latest / Quotes (stored points
+  per series, post-update) — with newly fetched points called out in
+  one line above. HistoryRow carries coverage (first/last/count/added)
+  instead of "skipped" prose; every managed series gets a row, empty
+  series show "— — 0" honestly. Quiet runs repeat facts, which is
+  allowed; walls of identical words are not.

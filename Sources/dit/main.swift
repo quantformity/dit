@@ -1228,20 +1228,23 @@ enum Main {
                                                      eraseFirst: options.has("all"))
         print("Daily history — \(configuration.backend.rawValue) at \(configuration.url.path)")
         for line in report.lines { print("  \(line)") }
-        if !report.historyRows.isEmpty {
-            if report.seriesFetched == 0 {
-                // Nothing actually happened — one honest summary line
-                // instead of a wall of identical "skipped" rows.
-                print("  nothing to fetch — all \(report.historyRows.count) series are covered through their holding windows")
-            } else {
-                let rows = report.historyRows.map { [$0.name, $0.result, $0.range] }
-                for line in Table.render(headers: ["Series", "Result", "Range"],
-                                         rows: rows, leftColumns: [0, 1, 2]) {
-                    print("  \(line)")
-                }
+        if report.pointsStored > 0 {
+            // Changes first, one compact line — then the coverage view.
+            let changed = report.historyRows.filter { $0.added > 0 }
+                .map { "\($0.name) +\($0.added)" }
+            print("  +\(report.pointsStored) new points stored (\(changed.joined(separator: ", ")))")
+        }
+        let historyRows = report.historyRows.map { [$0.name, $0.first, $0.last, "\($0.count)"] }
+        if !historyRows.isEmpty {
+            // Coverage per series, post-update: earliest day, latest
+            // day, stored points. A quiet run repeats the same facts —
+            // facts are allowed on screen, walls of "skipped" are not.
+            for line in Table.render(headers: ["Ticker", "Earliest", "Latest", "Quotes"],
+                                     rows: historyRows, leftColumns: [0, 1, 2]) {
+                print("  \(line)")
             }
         } else if report.lines.isEmpty {
-            print("  nothing to fetch — every series is covered through its holding window (or nothing was ever held)")
+            print("  no series to maintain (nothing has ever been held)")
         }
         for failure in report.failures { printErr("warning: \(failure)") }
         // Every fetch failing with nothing stored means the network
@@ -2581,13 +2584,13 @@ enum Main {
               where the store has no data yet — re-running adds just the
               new end-of-day quotes. --all erases the daily history
               first and refetches everything (latest snapshots survive).
-              Both need the network; --offline refuses them. 'import' and
+              Both need the network; --offline refuses them. 'history'
+              ends with a coverage table (earliest / latest stored day
+              and point count per series); anything newly fetched is
+              called out in a line above it. 'import' and
               'show' work offline: import stores what you measured (an
               old app's cache, a vendor file), show marks which points
               are real and which were derived (see 'dit market backfill').
-              A history run that fetches nothing collapses to one
-              summary line — a wall of identical 'skipped' rows teaches
-              nothing.
             """
         case ("quote", _):
             return """

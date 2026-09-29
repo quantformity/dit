@@ -302,8 +302,8 @@ final class MarketUpdaterTests: XCTestCase {
                            today: utc("2025-06-30"))
         let requestsLater = await provider.seriesRequestCount
         XCTAssertEqual(requestsAfter, requestsLater, "second run must not re-fetch")
-        XCTAssertTrue(report2.historyRows.contains { $0.name == "AAPL" && $0.result.contains("skipped") })
-        XCTAssertEqual(report2.historyRows.count, report2.seriesSkipped, "every quiet series still gets a row")
+        XCTAssertTrue(report2.historyRows.contains { $0.name == "AAPL" && $0.first == "2025-01-02" && $0.last == "2025-03-05" && $0.count == 63 && $0.added == 0 })
+        XCTAssertTrue(report2.historyRows.allSatisfy { $0.added == 0 }, "second run changes no coverage")
         _ = report
     }
 

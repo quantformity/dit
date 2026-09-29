@@ -143,13 +143,26 @@ public struct LatestRow: Sendable {
     public let asOf: String
 }
 
-/// One row of the daily-history table: what happened to one series in
-/// an update run. `result` is self-describing ("+5 daily closes",
-/// "complete — skipped"); `range` is the window examined or touched.
+/// One row of the daily-history coverage table: what the market
+/// store holds for one series AFTER the update run. `first`/`last`
+/// are the earliest/latest stored points ("—" when nothing is
+/// stored), `count` the total points, `added` how many are new this
+/// run. Coverage is the fact worth printing; "skipped" chatter was
+/// just the absence of a fact.
 public struct HistoryRow: Sendable {
     public let name: String
-    public let result: String
-    public let range: String
+    public let first: String
+    public let last: String
+    public let count: Int
+    public let added: Int
+
+    public init(name: String, first: String, last: String, count: Int, added: Int) {
+        self.name = name
+        self.first = first
+        self.last = last
+        self.count = count
+        self.added = added
+    }
 }
 
 /// The outcome of one market-store update run: printable table rows,
@@ -289,9 +302,7 @@ public struct MarketUpdater: Sendable {
             let alreadyCovered = coveredThrough.map { $0 >= windowEnd } ?? false
             if alreadyCovered {
                 report.seriesSkipped += 1
-                report.historyRows.append(HistoryRow(
-                    name: symbol, result: "complete — skipped",
-                    range: "through \(Self.stampDay(windowEnd))"))
+                report.historyRows.append(Self.coverageRow(symbol, existing, added: 0))
                 continue
             }
 
@@ -306,6 +317,7 @@ public struct MarketUpdater: Sendable {
             let fetchEnd = windowEnd
             guard fetchStart <= fetchEnd else {
                 report.seriesSkipped += 1
+                report.historyRows.append(Self.coverageRow(symbol, existing, added: 0))
                 continue
             }
 
@@ -320,16 +332,7 @@ public struct MarketUpdater: Sendable {
                 let added = data.mergeSeries(symbol: symbol, currency: fetched.currency,
                                              points: inside, through: fetchEnd)
                 report.pointsStored += added
-                let rangeText = "\(Self.stampDay(fetchStart)) … \(Self.stampDay(fetchEnd))"
-                if added == 0 {
-                    report.historyRows.append(HistoryRow(
-                        name: symbol, result: "nothing new (already covered, no data, or not held)",
-                        range: rangeText))
-                } else {
-                    report.historyRows.append(HistoryRow(
-                        name: symbol, result: "+\(added) daily closes",
-                        range: rangeText))
-                }
+                report.historyRows.append(Self.coverageRow(symbol, data.series[symbol], added: added))
             } catch {
                 report.failures.append("\(symbol): history fetch failed: \(error)")
             }
@@ -350,9 +353,7 @@ public struct MarketUpdater: Sendable {
             let existing = data.series[pairKey]
             if let lastDay = existing?.coveredThrough, lastDay >= todayDay.addingTimeInterval(-86_400 * 3) {
                 report.seriesSkipped += 1
-                report.historyRows.append(HistoryRow(
-                    name: pairKey, result: "current — skipped",
-                    range: "through \(Self.stampDay(lastDay))"))
+                report.historyRows.append(Self.coverageRow(pairKey, existing, added: 0))
                 continue
             }
             let fetchStart: Date
@@ -368,9 +369,7 @@ public struct MarketUpdater: Sendable {
                 let added = data.mergeSeries(symbol: pairKey, currency: currency,
                                              points: fetched.points, through: todayDay)
                 report.pointsStored += added
-                report.historyRows.append(HistoryRow(
-                    name: pairKey, result: "+\(added) daily rates",
-                    range: "\(Self.stampDay(fetchStart)) … \(Self.stampDay(todayDay))"))
+                report.historyRows.append(Self.coverageRow(pairKey, data.series[pairKey], added: added))
             } catch {
                 report.failures.append("\(pairKey): history fetch failed: \(error)")
             }
@@ -390,6 +389,19 @@ public struct MarketUpdater: Sendable {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+
+    /// Coverage snapshot of one series (points may arrive unsorted —
+    /// min/max, never first/last). An empty or missing series still
+    /// gets a row: "— — 0" says "no data" honestly instead of
+    /// hiding the series.
+    static func coverageRow(_ name: String, _ series: PriceSeries?, added: Int) -> HistoryRow {
+        guard let series, let first = series.points.map(\.day).min(),
+              let last = series.points.map(\.day).max() else {
+            return HistoryRow(name: name, first: "—", last: "—", count: 0, added: added)
+        }
+        return HistoryRow(name: name, first: stampDay(first), last: stampDay(last),
+                          count: series.points.count, added: added)
     }
 
     /// Compact local-time stamp for human tables ("2026-09-29 14:26").

@@ -337,10 +337,10 @@ dit market show [--symbol S] [--days N]   # inspect what the market store holds
 compact timestamps). `market show` prints two aligned tables — Latest
 snapshots and History series — and `--symbol` restricts BOTH to one
 ticker (it prints an honest "nothing stored for X" instead of empty
-tables). A `history` run that fetches nothing collapses to one summary
-line; the per-series table appears only when something actually
-happened. Display formatting only — the data and exit codes are
-unchanged.
+tables). `market history` ends with a per-series coverage table —
+earliest day, latest day, and point count of what the store now
+holds — with newly fetched points called out in a line above it.
+Display formatting only — the data and exit codes are unchanged.
 
 ### Derived history (`market backfill`)
 
