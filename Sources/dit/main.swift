@@ -349,9 +349,9 @@ enum Main {
     // MARK: - account commands
 
     private static func accountShow(_ args: [String], global: Global) async throws {
-        let options = try Options(args)
+        let options = try Options(args, flagOptions: ["history"])
         guard let reference = options.positionals.first else {
-            throw ParseError("usage: dit account show <account>")
+            throw ParseError("usage: dit account show <account> [--history]")
         }
         let (store, configuration) = try openStore(global: global)
         guard let portfolio = try await store.load() else {
@@ -393,6 +393,36 @@ enum Main {
             for position in balances.positions {
                 print("    \(position.symbol)  \(trim(position.shares)) @ \(trim(position.averageCostPerShare))"
                     + " = \(money(position.costBasis, position.currency)) cost basis")
+            }
+        }
+
+        if options.has("history") {
+            // The account's full ledger, oldest first — the same rows as
+            // `dit tx list --account …`, shown here so one command
+            // answers both "what does it hold" and "how did it get
+            // there". Stable order (date, then storage order) keeps
+            // output identical between runs. Offline by construction:
+            // everything comes from the ledger document.
+            let indexed = portfolio.transactions(in: account.id).enumerated()
+                .sorted { lhs, rhs in
+                    if lhs.element.date != rhs.element.date { return lhs.element.date < rhs.element.date }
+                    return lhs.offset < rhs.offset
+                }
+            print("\nHistory (\(indexed.count) transaction(s), oldest first):")
+            if indexed.isEmpty {
+                print("  — no activity recorded —")
+            } else {
+                let rows = indexed.map { entry -> [String] in
+                    let tx = entry.element
+                    return [String(tx.id.uuidString.prefix(8)), shortDate(tx.date),
+                            tx.kindName, tx.summaryLine]
+                }
+                for line in Table.render(headers: ["ID", "Date", "Kind", "Detail"],
+                                         rows: rows, leftColumns: [0, 1, 2, 3]) {
+                    print("  \(line)")
+                }
+                print("\n  Filter deeper: 'dit tx list --account \"\(account.displayName)\" "
+                    + "--kind/--ticker/--since/--until/--limit'; edit with 'dit tx show <id>'.")
             }
         }
     }
@@ -2159,11 +2189,21 @@ enum Main {
             """
         case ("account", "show"):
             return """
-            USAGE: dit account show <account>
+            USAGE: dit account show <account> [--history]
 
               Account details plus balances derived from its transactions,
               computed offline: positions show at cost basis and foreign
               amounts stay unconverted (no FX is applied).
+
+              --history appends the account's full chronological ledger
+              (deposits, trades, dividends, GICs, FX — oldest first, with
+              transaction IDs). For filtered views use 'dit tx list
+              --account NAME' (--kind/--ticker/--since/--until/--limit).
+
+              EXAMPLES
+                dit account show TFSA
+                dit account show TFSA --history
+                dit account show 4F2A --history
             """
         case ("account", "add"):
             return """

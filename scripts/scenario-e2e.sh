@@ -127,6 +127,10 @@ expect_ok     "sell 4 AAPL @ 200"                      "$DIT" tx sell --account 
 expect_ok_match "oversell recorded, flagged as short"  "SHORT"                  "$DIT" tx sell --account Mercury --ticker AAPL --shares 50 --price 200 --date 2026-02-11
 expect_ok_match "position still visible in summary"    "SHOP.TO"                "$DIT" --offline summary
 expect_fail_match "sell without price offline refused" 2 "pass --price"          "$DIT" --offline tx sell --account TFSA --ticker SHOP.TO --shares 2
+expect_ok_match "account show --history lists the ledger" "oldest first"         "$DIT" account show TFSA --history
+expect_ok_match "history shows a trade line with id"     "buy 10 SHOP.TO @ 180" "$DIT" account show TFSA --history
+expect_ok "add a quiet account"                          "$DIT" account add --currency CAD --name Quiet
+expect_ok_match "quiet account history says so"          "no activity recorded"  "$DIT" account show Quiet --history
 
 echo
 echo "-- 5. Dividends, including an unregistered ticker --"

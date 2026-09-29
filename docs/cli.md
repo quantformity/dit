@@ -72,6 +72,9 @@ whitespace-trimmed) or a UUID / unique prefix of one.
 ```
 dit accounts                                  # list accounts
 dit account show <account>                    # details + balances
+                                              # (--history appends the
+                                              #  full chronological ledger,
+                                              #  offline, with tx IDs)
 dit account add --currency CCY [options]      # create an account
 dit account edit <account> [options]          # change values
 dit account close <account> [--date D]        # mark closed (gets a closed-date; still in listings & summary)
@@ -92,6 +95,7 @@ dit account add --currency CAD --name TFSA --non-taxable --institution "Desjardi
 dit account add --currency USD --name "Mercury" --institution "Mercury"
 
 dit account show TFSA
+dit account show "CAD RRSP" --history          # ledger: date, kind, detail + tx id
 dit account edit Mercury --notes "broker + cash"
 dit account close TFSA --date 2031-12-31        # mark as closed
 
