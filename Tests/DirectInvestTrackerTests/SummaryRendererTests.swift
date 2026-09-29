@@ -47,8 +47,28 @@ struct SummaryRendererTests {
         #expect(text.contains("By currency:"))
         #expect(text.contains("Accounts:"))
         #expect(text.contains("Holdings:"))
+        // Percent return: 500 P&L on a 6 000 cost = +8.3%.
+        #expect(text.contains("P&L%"))
+        #expect(text.contains("+8.3%"))
         // Everything quoted → no cost-basis footnote.
         #expect(!text.contains("cost basis"))
+    }
+
+    @Test func percentColumnDashesWithoutAQuoteAndReadsNegativeForLosses() {
+        let portfolio = cadPortfolio()
+        // No quotes at all: the holdings row must carry a dash, never a
+        // fake "+0.0%" manufactured from cost-basis values.
+        let unquoted = SummaryRenderer.render(portfolio.summary())
+        #expect(unquoted.contains("P&L%"))
+        let dashLine = unquoted.split(separator: "\n").first { $0.contains("SHOP.TO") && $0.contains("6,000") }
+        #expect(dashLine.map { !$0.contains("%") } ?? false,
+                "unquoted holdings row must dash the percent column")
+
+        // Losing position: quoted at 54 on a 60 cost → −10.0% exactly,
+        // with the explicit minus sign.
+        let losing = SummaryRenderer.render(
+            portfolio.summary(from: quote(portfolio: portfolio, price: Decimal(string: "54")!)))
+        #expect(losing.contains("-10.0%"))
     }
 
     @Test func unquotedPositionsFallBackToCostBasisWithFootnote() {
@@ -60,8 +80,10 @@ struct SummaryRendererTests {
         #expect(text.contains("10,030.00 CAD"))         // 4 030 cash + 6 000 at cost
         #expect(text.contains("6,000.00"))              // position at cost basis
         #expect(text.contains("SHOP.TO (CAD) valued at cost basis — no fresh quote"))
-        // No unrealized number is printed at all.
+        // No unrealized number is printed at all, and no percent either.
         #expect(!text.contains("Unrealized P&L   500"))
+        let shopLine = text.split(separator: "\n").first { $0.contains("SHOP.TO") && $0.contains("6,000") }
+        #expect(shopLine.map { !$0.contains("%") } ?? false)
     }
 
     @Test func unconvertibleTotalsShowDashAndFootnote() {

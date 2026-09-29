@@ -50,6 +50,18 @@ public enum SummaryRenderer {
         return f
     }()
 
+    /// Percent RETURN for holdings: input is a fraction (0.123 renders
+    /// "+12.3%"). Positive values carry an explicit "+" so a column of
+    /// mixed results is readable at a glance.
+    private static let percentFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .percent
+        f.locale = Locale(identifier: "en_US")
+        f.minimumFractionDigits = 1
+        f.maximumFractionDigits = 1
+        return f
+    }()
+
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US")
@@ -139,12 +151,26 @@ public enum SummaryRenderer {
         if summary.holdings.isEmpty {
             lines.append("  —")
         } else {
-            let rows = summary.holdings.map { holding in
+            let rows = summary.holdings.map { holding -> [String] in
                 let last: String
                 if holding.unrealizedPnL != nil, holding.shares != 0 {
                     last = money2(holding.value / holding.shares)
                 } else {
                     last = "—"
+                }
+                // Percent RETURN, not a price ratio: P&L ÷ cost basis,
+                // computed in the position's own currency (the same
+                // currency P&L and cost were accumulated in), so FX
+                // movement cannot masquerade as trading gain. Dashed —
+                // never guessed — when there is no real quote (P&L was
+                // cost-basis fiction), or the cost basis is zero or
+                // negative (untracked shorts), where a percentage
+                // would be meaningless.
+                let pnlPct: String
+                if let pnl = holding.unrealizedPnL, holding.shares > 0, holding.costBasis > 0 {
+                    pnlPct = percent(pnl / holding.costBasis)
+                } else {
+                    pnlPct = "—"
                 }
                 return [
                     holding.symbol,
@@ -155,11 +181,12 @@ public enum SummaryRenderer {
                     last,
                     money2(holding.value),
                     money2(holding.unrealizedPnL),
+                    pnlPct,
                     holding.accountNames.joined(separator: ", ")
                 ]
             }
             lines.append(contentsOf: Table.render(
-                headers: ["Symbol", "Name", "Ccy", "Shares", "Avg cost", "Last", "Value", "P&L", "Where"],
+                headers: ["Symbol", "Name", "Ccy", "Shares", "Avg cost", "Last", "Value", "P&L", "P&L%", "Where"],
                 rows: rows,
                 leftColumns: [0, 1]
             ))
@@ -194,6 +221,14 @@ public enum SummaryRenderer {
     private static func money2(_ value: Decimal?) -> String {
         guard let value else { return "—" }
         return moneyFormatter.string(from: NSDecimalNumber(decimal: value)) ?? String(describing: value)
+    }
+
+    /// "+12.3%" / "-4.0%" / "+0.0%" from a fraction; the sign is always
+    /// explicit so zeros and negatives never look alike.
+    private static func percent(_ fraction: Decimal) -> String {
+        let text = percentFormatter.string(from: NSDecimalNumber(decimal: fraction))
+            ?? String(describing: fraction)
+        return fraction >= 0 ? "+" + text : text
     }
 
     private static func shares(_ value: Decimal) -> String {

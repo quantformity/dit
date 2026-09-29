@@ -1171,8 +1171,8 @@ enum Main {
             var currency = data.series[symbol]?.currency ?? .unknown
             if currency == .unknown,
                let slash = symbol.firstIndex(of: "/"),
-               let base = Currency(rawValue: String(symbol[..<slash])),
-               let quote = Currency(rawValue: String(symbol[symbol.index(after: slash)...])) {
+               Currency(rawValue: String(symbol[..<slash])) != nil, // both sides
+               let quote = Currency(rawValue: String(symbol[symbol.index(after: slash)...])) { // must be codes
                 currency = quote // "USD/CAD" prices CAD per 1 USD
             }
             let stored = data.mergeSeries(symbol: symbol, currency: currency, points: points)

@@ -57,9 +57,12 @@ dit summary --display usd   # show totals in USD
 dit --offline summary       # no network: positions with known prices only
 ```
 
-Output: total value, cash rows by currency, per-account values, holdings,
-and footnotes for facts the summary can't price (GICs at par, untracked
-shorts, etc.).
+Output: total value, cash rows by currency, per-account values, holdings
+(with per-position unrealized P&L and a **P&L%** column: percent return
+on cost basis, computed in the position's own trading currency so FX
+movement never masquerades as gain, dashed when there is no real quote
+or the cost basis is zero/negative), and footnotes for facts the
+summary can't price (GICs at par, untracked shorts, etc.).
 
 ## Accounts
 
