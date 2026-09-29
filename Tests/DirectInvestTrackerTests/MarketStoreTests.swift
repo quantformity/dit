@@ -353,7 +353,7 @@ final class MarketUpdaterTests: XCTestCase {
         XCTAssertEqual(request?.to, utc("2025-05-03"))
     }
 
-    func testHistoryEraseFirstRefetchesEverything() async throws {
+    func testHistoryRebuildRefetchesEverything() async throws {
         let provider1 = StubMarketProvider()
         await provider1.setDaily(["AAPL": [("2025-02-03", 200)]])
         let store = MarketStore(store: MemoryDataStore())
@@ -366,7 +366,7 @@ final class MarketUpdaterTests: XCTestCase {
         await provider2.setDaily(["AAPL": [("2025-02-03", 200), ("2025-03-01", 210)]])
         let report = try await MarketUpdater(provider: provider2, store: store)
             .updateHistory(portfolio: makePortfolio(), displayCurrency: .cad,
-                           eraseFirst: true, today: utc("2025-06-30"))
+                           mode: .rebuild, today: utc("2025-06-30"))
         // AAPL refetched AND TSLA (open position) too: nothing is
         // exempt from a wipe-and-refill.
         let requests = await provider2.seriesRequestSymbols
@@ -377,6 +377,54 @@ final class MarketUpdaterTests: XCTestCase {
         // Whole-window re-fetch restored the sold-out symbol's history.
         XCTAssertGreaterThanOrEqual(reloaded.series["AAPL"]?.points.count ?? 0, 2)
         _ = firstCount
+    }
+
+    func testHistoryRefillFindsGapsTheWatermarkWalkedPast() async throws {
+        // First pass: provider knows ONE close; the fetch still marks
+        // the whole window covered (watermark), so later incremental
+        // runs never look at it again.
+        let provider1 = StubMarketProvider()
+        await provider1.setDaily(["AAPL": [("2025-02-03", 200)]])
+        let store = MarketStore(store: MemoryDataStore())
+        _ = try await MarketUpdater(provider: provider1, store: store)
+            .updateHistory(portfolio: makePortfolio(), displayCurrency: .cad,
+                           today: utc("2025-06-30"))
+
+        // Later the provider "learns" eight more closes inside the
+        // covered window (a vendor file arrived, a fixture was fixed).
+        let provider2 = StubMarketProvider()
+        var full: [(String, Decimal)] = [("2025-02-03", 200)]
+        for day in ["2025-02-10", "2025-02-11", "2025-02-12", "2025-02-13",
+                    "2025-02-14", "2025-03-03", "2025-03-04", "2025-03-05"] {
+            full.append((day, 210))
+        }
+        await provider2.setDaily(["AAPL": full])
+
+        // Incremental trusts the watermark: AAPL is not re-requested.
+        _ = try await MarketUpdater(provider: provider2, store: store)
+            .updateHistory(portfolio: makePortfolio(), displayCurrency: .cad,
+                           today: utc("2025-06-30"))
+        let quietRequests = await provider2.seriesRequests
+        XCTAssertFalse(quietRequests.contains { $0.symbol == "AAPL" },
+                       "incremental must not re-fetch a covered window")
+
+        // --re-fill re-verifies the full window and MERGES: the fetch
+        // starts at the first holding day, nothing is erased, and the
+        // stored real close survives alongside the new days.
+        let refill = try await MarketUpdater(provider: provider2, store: store)
+            .updateHistory(portfolio: makePortfolio(), displayCurrency: .cad,
+                           mode: .refill, today: utc("2025-06-30"))
+        let refillRequests = await provider2.seriesRequests
+        guard let aapl = refillRequests.first(where: { $0.symbol == "AAPL" }) else {
+            return XCTFail("refill must re-fetch covered windows")
+        }
+        XCTAssertEqual(aapl.from, utc("2025-01-02"), "refill starts at the window's first holding day")
+        XCTAssertEqual(refill.pointsStored, 8, "only the missing days are added")
+        let loaded = try await store.load()
+        let series = try XCTUnwrap(loaded.series["AAPL"])
+        XCTAssertEqual(series.points.count, 9)
+        XCTAssertTrue(series.points.contains { $0.price == 200 && $0.via == nil },
+                      "the stored real close was not erased")
     }
 
     func testHistoryReportsFailedFetches() async throws {

@@ -388,3 +388,18 @@ and the user decides.
   instead of "skipped" prose; every managed series gets a row, empty
   series show "— — 0" honestly. Quiet runs repeat facts, which is
   allowed; walls of identical words are not.
+
+## 2026-09-29 — history fill modes: `--all` no longer erases
+
+- `dit market history` gained `HistoryFillMode`: default is still the
+  watermark-paced incremental fill; `--all` now RE-VERIFIES every
+  holding window and merges (fills gaps the watermark had walked
+  past — real closes are never replaced, only real replaces derived);
+  the erase-and-refetch behaviour moved to `--rebuild`. Using both
+  flags is a usage error (exit 2).
+- Watermark honesty unchanged: a quiet incremental run still re-fetches
+  nothing; refill proves it in `testHistoryRefillFindsGapsTheWatermark
+  WalkedPast` (quiet run = zero provider requests for a covered
+  window; refill = full-window request, 8 gap days added, stored real
+  close survives).
+- Units now 231 (111 XCTest + 120 swift-testing), scenario 132/132.

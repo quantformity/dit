@@ -1209,23 +1209,30 @@ enum Main {
             throw ParseError("'dit market history' fetches daily closes — "
                 + "--offline refuses the network")
         }
-        let options = try Options(args, valueOptions: ["from", "to"], flagOptions: ["all"])
+        let options = try Options(args, valueOptions: ["from", "to"], flagOptions: ["all", "rebuild"])
         guard options.positionals.isEmpty else {
             throw ParseError("unexpected argument '\(options.positionals[0])' — "
-                + "'dit market history' takes only --all / --from / --to (see 'dit help market')")
+                + "'dit market history' takes only --all / --rebuild / --from / --to (see 'dit help market')")
+        }
+        if options.has("all"), options.has("rebuild") {
+            throw ParseError("--all and --rebuild conflict — --all fills gaps but KEEPS stored closes, "
+                + "--rebuild erases the daily history first (pick one)")
         }
         if options["from"] != nil || options["to"] != nil {
             // Parsed for forward compatibility; refuse rather than
             // silently ignore a window nobody implemented.
             throw ParseError("--from/--to are not wired yet — history currently spans "
-                + "each symbol's full holding window; use 'dit market history --all' to rebuild it")
+                + "each symbol's full holding window; use 'dit market history --all' to re-verify it "
+                + "or --rebuild to erase and refetch")
         }
         guard let portfolio = try await marketPortfolio(global: global) else { return }
         let (marketStore, configuration) = try openMarketStore(global: global)
         let updater = MarketUpdater(provider: YahooQuoteProvider(), store: marketStore)
+        let mode: HistoryFillMode = options.has("rebuild") ? .rebuild
+            : options.has("all") ? .refill : .incremental
         let report = try await updater.updateHistory(portfolio: portfolio,
                                                      displayCurrency: global.display,
-                                                     eraseFirst: options.has("all"))
+                                                     mode: mode)
         print("Daily history — \(configuration.backend.rawValue) at \(configuration.url.path)")
         for line in report.lines { print("  \(line)") }
         if report.pointsStored > 0 {
@@ -2551,7 +2558,14 @@ enum Main {
             USAGE: dit market <command> [options]
 
               dit market latest              refresh latest prices + FX
-              dit market history [--all]     fill daily closes (incremental)
+              dit market history [--all|--rebuild]
+                                             fill daily closes (default:
+                                             incremental, watermark-paced);
+                                             --all re-verifies every
+                                             window and FILLS GAPS but
+                                             keeps stored real closes;
+                                             --rebuild erases the daily
+                                             history first and refetches
               dit market backfill <target> --from <source> [options]
                                              DERIVE missing history for a
                                              quote-less tracker (e.g. a
@@ -2582,8 +2596,11 @@ enum Main {
               pair (overwritten each run). 'history' stores daily closes
               for the days each symbol was actually held, fetched only
               where the store has no data yet — re-running adds just the
-              new end-of-day quotes. --all erases the daily history
-              first and refetches everything (latest snapshots survive).
+              new end-of-day quotes. --all re-fetches each window and
+              MERGES (fills holes the watermark had walked past; real
+              closes are never replaced), --rebuild erases the daily
+              history first and refetches everything (latest snapshots
+              survive).
               Both need the network; --offline refuses them. 'history'
               ends with a coverage table (earliest / latest stored day
               and point count per series); anything newly fetched is

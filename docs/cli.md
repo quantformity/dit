@@ -326,7 +326,7 @@ dit quote USD/CAD --as-of 2025-01-02 --offline
 
 ```
 dit market latest                      # refresh latest prices + FX for what you hold
-dit market history [--all]             # fill daily closes (incremental)
+dit market history [--all|--rebuild]   # fill daily closes (incremental; --all re-verifies, --rebuild erases)
 dit market backfill <target> --from <source> [--ratio R] [--dry-run]
                                        # DERIVE missing history from a proxy
 dit market import FILE [--dry-run]     # seed real closes from a CSV
@@ -385,7 +385,10 @@ ever touches the ledger.
   symbol was actually held (derived from your transactions — a symbol
   sold in May fetches nothing after May), and only where the store
   has no data yet. Re-running adds just the new closes; failed
-  fetches are reported. `--all` erases the daily history first and
+  fetches are reported. `--all` re-fetches every holding window and
+  MERGES — it fills gaps the watermark had walked past while keeping
+  every stored real close (real never replaces real; only real
+  replaces derived). `--rebuild` erases the daily history first and
   refetches everything (latest snapshots survive).
 - `show` reads the store offline: latest table, per-series coverage
   (with a Source column telling you whether points are observed or

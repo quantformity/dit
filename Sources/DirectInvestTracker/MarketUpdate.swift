@@ -186,16 +186,31 @@ public struct MarketUpdateReport: Sendable {
     public var seriesFetched: Int = 0
 }
 
+/// How far a `dit market history` run re-fetches.
+public enum HistoryFillMode: Sendable {
+    /// Default. Fetch only what the coverage watermark has not
+    /// verified yet (fast, holiday-aware).
+    case incremental
+    /// `--all`: re-fetch every holding window and MERGE — fills gaps
+    /// the watermark had walked past, keeps every stored real close
+    /// (real never replaces real; only real replaces derived).
+    case refill
+    /// `--rebuild`: erase all stored series first, then refetch.
+    case rebuild
+}
+
 /// Fills the market store from a provider.
 ///
 /// The two `dit market` commands live here:
 /// - ``updateLatest(portfolio:displayCurrency:now:)`` — refresh the
 ///   one "latest" snapshot per held symbol and needed FX pair (the
 ///   store keeps only the latest of each);
-/// - ``updateHistory(portfolio:displayCurrency:eraseFirst:today:)`` —
-///   fill daily closes for the days each symbol was actually held,
-///   fetching only what the store does not have yet; `eraseFirst`
-///   implements the wipe-and-refill option.
+/// - ``updateHistory(portfolio:displayCurrency:mode:today:)`` — fill
+///   daily closes for the days each symbol was actually held; the
+///   ``HistoryFillMode`` decides whether the coverage watermark may
+///   skip a range (incremental), whether covered ranges are
+///   re-verified and merged (refill), or whether everything is
+///   erased first (rebuild).
 ///
 /// The provider is injected, so the engine and its incremental rules
 /// are testable without a network.
@@ -260,7 +275,7 @@ public struct MarketUpdater: Sendable {
 
     // MARK: History
 
-    /// Fill the daily history, incrementally.
+    /// Fill the daily history, incrementally by default.
     ///
     /// For every symbol the ledger ever held, the engine computes the
     /// holding windows (``Portfolio/holdingWindows(through:)``) and
@@ -269,15 +284,17 @@ public struct MarketUpdater: Sendable {
     /// the first holding day for series never fetched before. A
     /// successful fetch advances the watermark even when it produced no
     /// new points, so holidays and no-data days are never re-requested.
-    /// `eraseFirst` drops all stored series (watermarks included) —
-    /// the wipe-and-refill option.
+    /// ``HistoryFillMode/refill`` bypasses the watermark (full-window
+    /// fetch, merged in — nothing erased); ``HistoryFillMode/rebuild``
+    /// erases the series first — the old `--all` behaviour, now
+    /// spelled `--rebuild`.
     public func updateHistory(portfolio: Portfolio,
                               displayCurrency: Currency,
-                              eraseFirst: Bool = false,
+                              mode: HistoryFillMode = .incremental,
                               today: Date = .now) async throws -> MarketUpdateReport {
         var report = MarketUpdateReport()
         var data = try await store.load()
-        if eraseFirst {
+        if mode == .rebuild {
             report.lines.append("erased stored history (\(data.series.count) series) — refetching everything")
             data.eraseSeries()
         }
@@ -299,7 +316,11 @@ public struct MarketUpdater: Sendable {
 
             let existing = data.series[symbol]
             let coveredThrough = existing?.coveredThrough
-            let alreadyCovered = coveredThrough.map { $0 >= windowEnd } ?? false
+            // Only the incremental mode trusts the watermark to skip;
+            // refill/rebuild re-verify the whole window — that is the
+            // point: to find holes the watermark had walked past.
+            let alreadyCovered = mode == .incremental
+                && (coveredThrough.map { $0 >= windowEnd } ?? false)
             if alreadyCovered {
                 report.seriesSkipped += 1
                 report.historyRows.append(Self.coverageRow(symbol, existing, added: 0))
@@ -307,9 +328,10 @@ public struct MarketUpdater: Sendable {
             }
 
             // Fetch only what is behind no watermark: from the day
-            // after it, or from the first holding day if never fetched.
+            // after it, or from the first holding day if never
+            // fetched. refill/rebuild start at the window's beginning.
             let fetchStart: Date
-            if let coveredThrough {
+            if mode == .incremental, let coveredThrough {
                 fetchStart = DailyPrice.utcDay(coveredThrough).addingTimeInterval(86_400)
             } else {
                 fetchStart = windowStart
@@ -351,13 +373,14 @@ public struct MarketUpdater: Sendable {
             let pairKey = "\(plan.hub.rawValue)/\(currency.rawValue)"
             guard let start = earliestOverall else { continue }
             let existing = data.series[pairKey]
-            if let lastDay = existing?.coveredThrough, lastDay >= todayDay.addingTimeInterval(-86_400 * 3) {
+            if mode == .incremental,
+               let lastDay = existing?.coveredThrough, lastDay >= todayDay.addingTimeInterval(-86_400 * 3) {
                 report.seriesSkipped += 1
                 report.historyRows.append(Self.coverageRow(pairKey, existing, added: 0))
                 continue
             }
             let fetchStart: Date
-            if let covered = existing?.coveredThrough {
+            if mode == .incremental, let covered = existing?.coveredThrough {
                 fetchStart = DailyPrice.utcDay(covered).addingTimeInterval(86_400)
             } else {
                 fetchStart = DailyPrice.utcDay(start)

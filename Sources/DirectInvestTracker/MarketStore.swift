@@ -177,7 +177,7 @@ public struct MarketData: Codable, Hashable, Sendable {
     }
 
     /// Removes every daily series, keeping the latest snapshots.
-    /// This is what `dit market history --all` does before refetching.
+    /// This is what `dit market history --rebuild` does before refetching.
     public mutating func eraseSeries() {
         series.removeAll()
     }
@@ -254,7 +254,7 @@ public struct MarketStore: Sendable {
         try await store.save(payload, key: Self.documentKey)
     }
 
-    /// Remove the whole market document (diagnostics; `--all` history
+    /// Remove the whole market document (diagnostics; `--rebuild` history
     /// refresh goes through `MarketData.eraseSeries` + `save` instead,
     /// so the latest snapshots survive).
     public func delete() async throws {
