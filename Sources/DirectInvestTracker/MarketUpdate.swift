@@ -432,26 +432,14 @@ public struct MarketUpdater: Sendable {
     /// JSONOutput; storage keeps reference-seconds doubles. Public so
     /// the CLI shell renders every date column with the same ruler.
     public static func stampShort(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return formatter.string(from: date)
+        TextFormat.minuteClock(date)
     }
 
     static func stampDay(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        return formatter.string(from: date)
+        TextFormat.day(date)
     }
 
     static func trim(_ amount: Decimal) -> String {
-        let formatter = NumberFormatter()
-        formatter.locale = Locale(identifier: "en_US")
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 4
-        return formatter.string(from: amount as NSDecimalNumber) ?? "\(amount)"
+        TextFormat.quantity(amount)
     }
 }

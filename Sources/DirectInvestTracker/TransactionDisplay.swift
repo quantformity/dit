@@ -50,16 +50,8 @@ extension Transaction {
     }
 
     static func dayString(_ date: Date) -> String {
-        dayFormatter.string(from: date)
+        TextFormat.day(date)
     }
-
-    private static let dayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        return formatter
-    }()
 }
 
 extension Transaction.Kind {

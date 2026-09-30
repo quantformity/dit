@@ -45,6 +45,33 @@ public struct Portfolio: Codable, Hashable, Sendable {
         return transactions.filter { $0.ticker == normalized }
     }
 
+    /// The display name of an account for listings, or "\u{2014}" when
+    /// the id matches no account — history must still render even if
+    /// its account vanished.
+    public func accountName(for accountID: UUID) -> String {
+        self[account: accountID]?.displayName ?? "\u{2014}"
+    }
+
+    /// Shares of `symbol` the account's ledger records, summed across
+    /// the WHOLE ledger (no as-of cutoff): buys plus, sells minus.
+    /// Goes negative when the account sold shares it did not have —
+    /// that is the point. (``AccountBalances`` clamps positions at
+    /// zero; this helper must not, or the "ends up SHORT" warning
+    /// would miss an account already in the hole.)
+    public func trackedSharesHeld(accountID: UUID, symbol: String) -> Decimal {
+        transactions.reduce(Decimal.zero) { total, transaction in
+            guard transaction.accountID == accountID else { return total }
+            switch transaction.kind {
+            case .stockPurchase(let details) where details.ticker == symbol:
+                return total + details.shares
+            case .stockSale(let details) where details.ticker == symbol:
+                return total - details.shares
+            default:
+                return total
+            }
+        }
+    }
+
     // MARK: Mutations
 
     public mutating func add(_ transaction: Transaction) {

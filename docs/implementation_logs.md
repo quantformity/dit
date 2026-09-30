@@ -435,3 +435,30 @@ and the user decides.
   money — cent-rounded rates are different numbers).
 - `ExchangeRate.pairRequest(for:)` + parsing tests; docs/cli.md and
   docs/json.md updated.
+
+## 2026-09-30 — Refactor sweep: one formatting brain, one replay order, split CLI
+
+- Behaviour-preserving cleanup only; verified by capturing every offline
+  output (summary, statements, histories, charts, help screens, JSON docs)
+  before and after — byte-identical except wall-clock timestamps.
+- `TextFormat.swift` (library): the ten hand-rolled NumberFormatter /
+  DateFormatter spellings collapse into named primitives. DISPLAY text
+  (grouped) and MACHINE text (plain, docs/json.md) stay separate families;
+  `day`/`isoStamp` are UTC, `clock`/`minuteClock`/`localDay` are the local
+  display kinds. SummaryRenderer, JSONOutput, MarketUpdate, TransactionDisplay
+  and the CLI now delegate; ChartRenderer keeps its own moneyLabel because
+  its round-then-print contract differs on purpose.
+- `Replay.ordered` (library): the stable "date, then storage position" sort
+  existed in four places; now it exists in one, and every listing that shows
+  derived state shares it.
+- `Portfolio` gains `accountName(for:)` (dash for a vanished account) and
+  `trackedSharesHeld(accountID:symbol:)` for the SHORT warning — deliberately
+  unclamped, unlike AccountBalances' position view.
+- `Sources/dit/` splits from one 3,013-line main.swift into main (dispatch),
+  Support (errors/options), HelpText, five command files, and Helpers
+  (shared parsing/lookup rules). Command bodies and help bytes unchanged;
+  dedent keeps multiline-literal output byte-stable because strip is
+  relative to the closing delimiter.
+- Dead `requirePortfolio` removed on the way.
+- Tests: +9 (TextFormat contracts, replay determinism, Portfolio helpers);
+  137 XCTest + swift-testing pass, e2e 190/190.

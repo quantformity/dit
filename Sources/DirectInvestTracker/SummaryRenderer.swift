@@ -37,24 +37,6 @@ public enum Table {
 /// future concern.
 public enum SummaryRenderer {
 
-    private static let moneyFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.locale = Locale(identifier: "en_US")
-        f.minimumFractionDigits = 2
-        f.maximumFractionDigits = 2
-        return f
-    }()
-
-    private static let sharesFormatter: NumberFormatter = {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.locale = Locale(identifier: "en_US")
-        f.minimumFractionDigits = 0
-        f.maximumFractionDigits = 4
-        return f
-    }()
-
     /// Percent RETURN for holdings: input is a fraction (0.123 renders
     /// "+12.3%"). Positive values carry an explicit "+" so a column of
     /// mixed results is readable at a glance.
@@ -64,14 +46,6 @@ public enum SummaryRenderer {
         f.locale = Locale(identifier: "en_US")
         f.minimumFractionDigits = 1
         f.maximumFractionDigits = 1
-        return f
-    }()
-
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US")
-        f.dateStyle = .medium
-        f.timeStyle = .short
         return f
     }()
 
@@ -101,7 +75,7 @@ public enum SummaryRenderer {
         let showConverted = summary.holdings.contains { $0.currency != summary.displayCurrency }
 
         // --- Header + grand totals -----------------------------------
-        lines.append("Portfolio summary — \(dateFormatter.string(from: date))  (display: \(display))")
+        lines.append("Portfolio summary — \(TextFormat.clock(date))  (display: \(display))")
         lines.append("")
         lines.append("  Total value      \(money(summary.totalValue, display))")
         lines.append("  Cash             \(money(summary.cash, display))")
@@ -272,7 +246,7 @@ public enum SummaryRenderer {
 
     private static func money2(_ value: Decimal?) -> String {
         guard let value else { return "—" }
-        return moneyFormatter.string(from: NSDecimalNumber(decimal: value)) ?? String(describing: value)
+        return TextFormat.money(value)
     }
 
     /// "+12.3%" / "-4.0%" / "+0.0%" from a fraction; the sign is always
@@ -284,7 +258,7 @@ public enum SummaryRenderer {
     }
 
     private static func shares(_ value: Decimal) -> String {
-        sharesFormatter.string(from: NSDecimalNumber(decimal: value)) ?? String(describing: value)
+        TextFormat.quantity(value)
     }
 
     private static func accountName(_ account: Account) -> String {

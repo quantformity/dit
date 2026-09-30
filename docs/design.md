@@ -44,7 +44,17 @@ on demand, never trusted blindly.
 ## Architecture
 
 ```
-Sources/dit/main.swift          CLI: two-stage parse → dispatch → print (exit 0/1/2)
+Sources/dit/
+  main.swift                    CLI entry: two-stage parse → dispatch → print (exit 0/1/2)
+  Support.swift                 error kinds, Invocation/Global, the option scanner
+  HelpText.swift                every help screen (rendered bytes are the contract)
+  CommandsCore.swift            summary, accounts list
+  CommandsAccount.swift         account + ticker commands
+  CommandsTx.swift              the ledger commands (list/show/entries/edit/delete)
+  CommandsMarket.swift          quote views + market-store commands
+  CommandsStore.swift           store path/export/backup/import
+  Helpers.swift                 shared CLI rules: account resolution with
+                                did-you-mean, store opening, scalar parsing
 Sources/DirectInvestTracker/
   Currency, Tag                 foundation values
   EquityTicker                  symbol-as-identity registry (name, currency, tags)
@@ -66,6 +76,14 @@ Sources/DirectInvestTracker/
   DataStoreFactory              backend-agnostic persistence; factory is the
                                 single config interpreter (flags > env > default)
   AccountRef/TransactionRef     reference resolution (name / UUID / prefix)
+  TextFormat.swift              one formatting brain + the canonical replay
+  (TextFormat, Replay)          order; DISPLAY text groups thousands, MACHINE
+                                text never does (docs/json.md contract); UTC
+                                day keys vs local display stamps. Replay order
+                                (date, then storage position) is shared by the
+                                balance engine, the statement view, and every
+                                history listing — same-day money never prints
+                                in an order where balances look scrambled.
   AccountMutations/
   TransactionMutations          write-side rules (validation, warnings, edits)
 ```

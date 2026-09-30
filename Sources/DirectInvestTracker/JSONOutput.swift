@@ -54,52 +54,24 @@ public enum JSONOutput {
     // MARK: Formatting primitives
 
     /// Money at fixed 2 decimals, no grouping ("279900.60", "-6179.00").
-    public static func money(_ value: Decimal) -> String { fixed(value, scale: 2) }
+    public static func money(_ value: Decimal) -> String { TextFormat.fixed(value, scale: 2) }
     /// Ratios/percents as fractions at fixed 4 decimals ("0.0153").
-    public static func fraction(_ value: Decimal) -> String { fixed(value, scale: 4) }
+    public static func fraction(_ value: Decimal) -> String { TextFormat.fixed(value, scale: 4) }
     /// FX rates at fixed 6 decimals ("1.418700").
-    public static func rate(_ value: Decimal) -> String { fixed(value, scale: 6) }
+    public static func rate(_ value: Decimal) -> String { TextFormat.fixed(value, scale: 6) }
     /// Share quantities, trimmed, up to 4 decimals ("840", "96.7").
     public static func quantity(_ value: Decimal) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.locale = Locale(identifier: "en_US")
-        f.usesGroupingSeparator = false
-        f.groupingSize = 0
-        f.minimumFractionDigits = 0
-        f.maximumFractionDigits = 4
-        return f.string(from: NSDecimalNumber(decimal: value)) ?? value.description
-    }
-
-    private static func fixed(_ value: Decimal, scale: Int) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.locale = Locale(identifier: "en_US")
-        f.usesGroupingSeparator = false
-        f.groupingSize = 0
-        f.minimumFractionDigits = scale
-        f.maximumFractionDigits = scale
-        return f.string(from: NSDecimalNumber(decimal: value)) ?? value.description
+        TextFormat.plainQuantity(value)
     }
 
     /// UTC calendar day, "2026-09-28".
     public static func isoDay(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = TimeZone(identifier: "UTC")
-        f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: date)
+        TextFormat.day(date)
     }
 
     /// UTC second-precision timestamp, "2026-09-29T02:51:00Z".
     public static func isoStamp(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = TimeZone(identifier: "UTC")
-        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
-        return f.string(from: date)
+        TextFormat.isoStamp(date)
     }
 }
 

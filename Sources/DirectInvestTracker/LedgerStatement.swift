@@ -33,20 +33,11 @@ public struct StatementRow: Sendable {
 
 public enum LedgerStatement {
 
-    /// Chronological order, storage order as tiebreaker — the same
-    /// replay order the balance engine uses.
-    private static func chronological(_ transactions: [Transaction]) -> [Transaction] {
-        transactions.enumerated().sorted { lhs, rhs in
-            if lhs.element.date != rhs.element.date { return lhs.element.date < rhs.element.date }
-            return lhs.offset < rhs.offset
-        }.map(\.element)
-    }
-
     /// Replay ONE account's ledger into statement rows, carrying a
     /// per-currency running cash balance.
     public static func rows(account: Account, transactions: [Transaction]) -> [StatementRow] {
         var cash: [Currency: Decimal] = [:]
-        return chronological(transactions).map { tx in
+        return Replay.ordered(transactions).map { tx in
             var debits: [(Currency, Decimal)] = []
             var credits: [(Currency, Decimal)] = []
             switch tx.kind {
@@ -93,11 +84,6 @@ public enum LedgerStatement {
             .flatMap { account in
                 rows(account: account, transactions: portfolio.transactions(in: account.id))
             }
-        return merged.enumerated().sorted { lhs, rhs in
-            if lhs.element.transaction.date != rhs.element.transaction.date {
-                return lhs.element.transaction.date < rhs.element.transaction.date
-            }
-            return lhs.offset < rhs.offset
-        }.map(\.element)
+        return Replay.ordered(merged, date: { $0.transaction.date })
     }
 }
