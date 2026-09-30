@@ -1818,27 +1818,81 @@ enum Main {
             }
             print("Transactions — \(scope) (\(rows.count) shown — statement view)")
             guard !rows.isEmpty else { return }
-            let statementRows = rows.map { row -> [String] in
-                let tx = row.transaction
-                let accountName = portfolio.accounts.first { $0.id == tx.accountID }?.displayName ?? "\u{2014}"
-                let debit = row.debits.map { "-\(money($0.amount, $0.currency))" }
-                    .joined(separator: " ")
-                let credit = row.credits.map { money($0.amount, $0.currency) }
-                    .joined(separator: " ")
-                let balance = row.cashAfter.isEmpty ? "\u{2014}"
-                    : row.cashAfter.map { money($0.amount, $0.currency) }.joined(separator: " ")
-                return [String(tx.id.uuidString.prefix(8)), shortDate(tx.date), accountName,
-                        tx.summaryLine, debit, credit, balance]
+            // Multi-currency accounts get ONE BALANCE COLUMN PER CURRENCY,
+            // for every currency present ANYWHERE in the displayed history
+            // (even if a purse later empties — its column stays, showing
+            // '—', because "no cash here" is information, not absence of
+            // data). Dedicated columns stay comparable top-to-bottom; a
+            // joined money string drifts. Up to four currencies; beyond
+            // that the joined single column returns (table width trumps).
+            var involved: Set<Currency> = []
+            for row in rows {
+                row.debits.forEach { involved.insert($0.currency) }
+                row.credits.forEach { involved.insert($0.currency) }
+                row.cashAfter.forEach { involved.insert($0.currency) }
             }
-            for line in Table.render(headers: ["ID", "Date", "Account", "Detail", "Debit", "Credit", "Balance after"],
-                                     rows: statementRows, leftColumns: [0, 1, 2, 3]) {
+            let currencies = involved.sorted { $0.rawValue < $1.rawValue }
+            let splitBalances = (2...4).contains(currencies.count)
+            let statementRows: [[String]]
+            let headers: [String]
+            var legend: [String]
+            if splitBalances {
+                headers = ["ID", "Date", "Account", "Detail", "Debit", "Credit"]
+                    + currencies.map { "Bal \($0.rawValue)" }
+                statementRows = rows.map { row -> [String] in
+                    let tx = row.transaction
+                    let accountName = portfolio.accounts.first { $0.id == tx.accountID }?.displayName ?? "\u{2014}"
+                    let debit = row.debits.map { "-\(money($0.amount, $0.currency))" }
+                        .joined(separator: " ")
+                    let credit = row.credits.map { money($0.amount, $0.currency) }
+                        .joined(separator: " ")
+                    // Column header names the currency, so cells hold bare
+                    // numbers; '—' means NO cash in that currency here.
+                    let balances = currencies.map { currency -> String in
+                        guard let entry = row.cashAfter.first(where: { $0.currency == currency }) else {
+                            return "\u{2014}"
+                        }
+                        return amountOnly(entry.amount)
+                    }
+                    return [String(tx.id.uuidString.prefix(8)), shortDate(tx.date), accountName,
+                            tx.summaryLine, debit, credit] + balances
+                }
+                legend = [
+                    "  Debit/Credit/Bal columns are cash, derived on the fly \u{2014} nothing is",
+                    "  stored, and positions or GICs never appear in a cash column. Each",
+                    "  'Bal CCY' column is THAT account's running cash in that currency",
+                    "  (never summed across accounts); '\u{2014}' means no cash in that currency at",
+                    "  that point. Any filter (--kind/--ticker/--since/--until/--limit)",
+                    "  gives the plain list instead.",
+                ]
+            } else {
+                headers = ["ID", "Date", "Account", "Detail", "Debit", "Credit", "Balance after"]
+                statementRows = rows.map { row -> [String] in
+                    let tx = row.transaction
+                    let accountName = portfolio.accounts.first { $0.id == tx.accountID }?.displayName ?? "\u{2014}"
+                    let debit = row.debits.map { "-\(money($0.amount, $0.currency))" }
+                        .joined(separator: " ")
+                    let credit = row.credits.map { money($0.amount, $0.currency) }
+                        .joined(separator: " ")
+                    let balance = row.cashAfter.isEmpty ? "\u{2014}"
+                        : row.cashAfter.map { money($0.amount, $0.currency) }.joined(separator: " ")
+                    return [String(tx.id.uuidString.prefix(8)), shortDate(tx.date), accountName,
+                            tx.summaryLine, debit, credit, balance]
+                }
+                legend = [
+                    "  Debit/Credit/Balance are cash, derived on the fly \u{2014} nothing is",
+                    "  stored, and positions or GICs never appear in a cash column. Balance =",
+                    "  cash left in THAT account (per currency) after the event. Any filter",
+                    "  (--kind/--ticker/--since/--until/--limit) gives the plain list instead.",
+                ]
+            }
+            for line in Table.render(headers: headers,
+                                     rows: statementRows,
+                                     leftColumns: [0, 1, 2, 3]) {
                 print("  \(line)")
             }
             print()
-            print("  Debit/Credit/Balance are cash, derived on the fly \u{2014} nothing is")
-            print("  stored, and positions or GICs never appear in a cash column. Balance =")
-            print("  cash left in THAT account (per currency) after the event. Any filter")
-            print("  (--kind/--ticker/--since/--until/--limit) gives the plain list instead.")
+            legend.forEach { print($0) }
             return
         }
 
@@ -2453,6 +2507,17 @@ enum Main {
         formatter.maximumFractionDigits = 2
         let value = formatter.string(from: amount as NSDecimalNumber) ?? "\(amount)"
         return "\(currency.rawValue) \(value)"
+    }
+
+    /// Money without the currency tag — for columns whose header already
+    /// names the currency.
+    private static func amountOnly(_ amount: Decimal) -> String {
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter.string(from: amount as NSDecimalNumber) ?? "\(amount)"
     }
 
     private static func trim(_ amount: Decimal) -> String {

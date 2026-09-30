@@ -75,6 +75,25 @@ struct LedgerStatementTests {
         #expect(last.cashAfter.first?.amount == dec("60"))
     }
 
+    @Test func sameDayRowsKeepReplayOrderAcrossAccounts() {
+        // Merging accounts must not reorder same-day rows by name or
+        // uuid: a running balance only reads correctly in the order
+        // it was computed (money must never appear to evaporate).
+        let a = Account(reportingCurrency: .usd, name: "A")
+        let b = Account(reportingCurrency: .usd, name: "B")
+        var portfolio = Portfolio(accounts: [a, b])
+        portfolio.transactions = [
+            Transaction(date: day(2026, 1, 5), accountID: a.id, currency: .usd, kind: .deposit(amount: 100)),
+            Transaction(date: day(2026, 1, 5), accountID: b.id, currency: .usd, kind: .deposit(amount: 100)),
+            Transaction(date: day(2026, 1, 5), accountID: b.id, currency: .usd, kind: .withdrawal(amount: 40)),
+        ]
+        let rows = LedgerStatement.rows(portfolio: portfolio)
+        #expect(rows.map(\.transaction.accountID) == [a.id, b.id, b.id])
+        // B's own chain is visible and continuous: 100 → 60.
+        #expect(rows[1].cashAfter.first?.amount == dec("100"))
+        #expect(rows[2].cashAfter.first?.amount == dec("60"))
+    }
+
     @Test func sameDayRowsKeepStorageOrderAndRunningState() {
         // A withdrawal and a sale recorded the same day: replay order
         // is storage order (matching AccountBalances.compute), and the

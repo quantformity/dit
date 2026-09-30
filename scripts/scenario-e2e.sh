@@ -371,17 +371,22 @@ echo "-- 18. Statement view (unfiltered tx list = bank style) --"
 # Without trade filters, 'tx list' derives Debit/Credit/Balance on the
 # fly; with ANY filter it must stay the plain list (running balances
 # over a subset would be theater).
-expect_ok_match "stmt: plain list gains Debit/Credit/Balance" "Balance after"  "$DIT" tx list
+expect_ok_match "stmt: plain list gains Debit/Credit/Balance" "Bal USD|Balance after"  "$DIT" tx list
 expect_ok_match "stmt: the view explains what it is"          "derived on the fly" "$DIT" tx list
-expect_ok_match "stmt: account scope keeps its own balances"  "Balance after"  "$DIT" tx list --account TFSA
-if "$DIT" tx list --kind deposit | grep -q "Balance after"; then
+expect_ok_match "stmt: account scope keeps its own balances"  "Bal USD|Balance after"  "$DIT" tx list --account TFSA
+if "$DIT" tx list --kind deposit | grep -Eq "Bal USD|Balance after"; then
   FAIL=$((FAIL+1)); echo "FAIL — stmt: --kind must keep the plain list"
 else PASS=$((PASS+1)); echo "ok   — stmt: --kind keeps the plain list"; fi
-if "$DIT" tx list --limit 5 | grep -q "Balance after"; then
+if "$DIT" tx list --limit 5 | grep -Eq "Bal USD|Balance after"; then
   FAIL=$((FAIL+1)); echo "FAIL — stmt: --limit must keep the plain list"
 else PASS=$((PASS+1)); echo "ok   — stmt: --limit keeps the plain list"; fi
-# Per-account truth: Mercury (a USD account) must show its OWN USD
-# running balance, never a sum across accounts.
+# The multi-currency account must show one aligned column PER CURRENCY
+# that appears anywhere in its history (TFSA holds a USD purse after
+# its fx), and single-currency accounts keep the compact one-column
+# balance. Balances are per account+currency, never summed.
+expect_ok_match "stmt: multi-ccy account splits balance columns" "Bal USD"     "$DIT" tx list --account TFSA
+expect_ok_match "stmt: single-ccy account keeps one column"     "Balance after" "$DIT" tx list --account "Mercury Bank"
+expect_ok_match "stmt: multi-ccy all-accounts view splits too"   "Bal USD"     "$DIT" tx list
 expect_ok_match "stmt: USD account balance speaks USD" "USD" "$DIT" tx list --account "Mercury Bank"
 
 echo

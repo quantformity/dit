@@ -84,20 +84,20 @@ public enum LedgerStatement {
     /// Every account's ledger interleaved by date for display. Each
     /// row's Balance column stays that ACCOUNT's own cash (per
     /// currency) — the merge orders the rows, it never sums across
-    /// accounts.
+    /// accounts. Same-day rows keep their LEDGER replay order (stable
+    /// merge): a running balance only reads correctly in the order it
+    /// was computed, so a uuid or name tiebreak could show money
+    /// evaporating between two printed lines.
     public static func rows(portfolio: Portfolio) -> [StatementRow] {
-        portfolio.accounts
+        let merged = portfolio.accounts
             .flatMap { account in
                 rows(account: account, transactions: portfolio.transactions(in: account.id))
             }
-            .sorted { lhs, rhs in
-                if lhs.transaction.date != rhs.transaction.date {
-                    return lhs.transaction.date < rhs.transaction.date
-                }
-                let leftAccount = portfolio[account: lhs.transaction.accountID]?.displayName ?? ""
-                let rightAccount = portfolio[account: rhs.transaction.accountID]?.displayName ?? ""
-                if leftAccount != rightAccount { return leftAccount < rightAccount }
-                return lhs.transaction.id.uuidString < rhs.transaction.id.uuidString
+        return merged.enumerated().sorted { lhs, rhs in
+            if lhs.element.transaction.date != rhs.element.transaction.date {
+                return lhs.element.transaction.date < rhs.element.transaction.date
             }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 }
