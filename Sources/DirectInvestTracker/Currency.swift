@@ -112,6 +112,8 @@ public enum Currency: String, Codable, CaseIterable, Sendable, Comparable {
         self = Currency(rawValue: code) ?? .unknown
     }
 
+    /// Encodes the ISO code (the stored/JSON spelling of a currency);
+    /// `.unknown` writes `""`, matching its rawValue.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(isoCode)

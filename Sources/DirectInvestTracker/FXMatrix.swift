@@ -9,6 +9,10 @@ import Foundation
 // labelled — a triangulated number is an approximation, and the
 // contract (docs/json.md) requires it to say so.
 
+/// Single-day FX cross-rate table (`dit quote CCY/CCY/…`).
+///
+/// Direct observations win over composed ones; everything composed is
+/// labelled (see file header and docs/json.md for the honesty rules).
 public enum FXMatrix {
 
     /// A chain is 3+ known ISO codes separated by `/` (fewer than 3
@@ -40,7 +44,9 @@ public enum FXMatrix {
 
     /// One directional rate: `base` buys `rate` units of `quote`.
     public struct Cell: Sendable {
+        /// Left side of the pair (the unit being priced).
         public let base: Currency
+        /// Right side (what one unit of `base` buys).
         public let quote: Currency
         /// nil = no observation and no triangulation path.
         public let rate: Decimal?
@@ -51,6 +57,8 @@ public enum FXMatrix {
         /// derived/none and live.
         public let date: String?
 
+        /// Memberwise init; `basis`/`date` carry the provenance so the
+        /// table can label a derived rate (`*`, "via USD").
         public init(base: Currency, quote: Currency, rate: Decimal?, basis: String, date: String?) {
             self.base = base
             self.quote = quote

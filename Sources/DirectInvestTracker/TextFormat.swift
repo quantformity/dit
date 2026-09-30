@@ -19,6 +19,8 @@ import Foundation
 // function-local avoids any cross-thread sharing of Foundation's
 // formatter classes entirely.
 
+/// Shared text formatting for display tables and the machine contract
+/// (see file header: grouped display text vs. non-grouped JSON text).
 public enum TextFormat {
 
     // MARK: Display money and quantities (grouped)

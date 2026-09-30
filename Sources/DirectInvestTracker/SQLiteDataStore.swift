@@ -59,6 +59,9 @@ public actor SQLiteDataStore: DataStore {
 
     // MARK: DataStore
 
+    /// Inserts or replaces the key's row in one upsert statement
+    /// (`ON CONFLICT DO UPDATE`), so replacement is atomic with respect
+    /// to other readers of the database.
     public func save(_ payload: Data, key: String) async throws {
         let stmt = try prepare(
             "INSERT INTO store (key, payload) VALUES (?, ?) "
@@ -85,6 +88,9 @@ public actor SQLiteDataStore: DataStore {
         }
     }
 
+    /// The key's BLOB, or `nil` when no row matches. A query failure is
+    /// an error, never a silent `nil` (an unreadable store must not read
+    /// as empty).
     public func load(key: String) async throws -> Data? {
         let stmt = try prepare("SELECT payload FROM store WHERE key = ?")
         defer { sqlite3_finalize(stmt) }
@@ -107,6 +113,8 @@ public actor SQLiteDataStore: DataStore {
         }
     }
 
+    /// Deletes the key's row; no row is a no-op (idempotent, per the
+    /// `DataStore` contract).
     public func delete(key: String) async throws {
         let stmt = try prepare("DELETE FROM store WHERE key = ?")
         defer { sqlite3_finalize(stmt) }
@@ -122,6 +130,8 @@ public actor SQLiteDataStore: DataStore {
         }
     }
 
+    /// All stored keys, alphabetical (the query orders them, unlike
+    /// the file backend's sorted-after-the-fact list).
     public func keys() async throws -> [String] {
         let stmt = try prepare("SELECT key FROM store ORDER BY key")
         defer { sqlite3_finalize(stmt) }

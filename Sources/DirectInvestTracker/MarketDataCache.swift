@@ -44,6 +44,8 @@ public struct MarketDataCache: @unchecked Sendable {
 
     private let box: Box
 
+    /// An empty cache. Thread-safe to share; each instance keeps its
+    /// own observations (per-run caches keep `--offline` runs honest).
     public init() {
         box = Box()
     }

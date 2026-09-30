@@ -24,6 +24,8 @@ public enum MutationError: LocalizedError, Equatable {
     case importDanglingAccount(id: UUID)
     case unresolvable(String)
 
+    /// CLI-ready message for each failure (what to type instead is
+    /// part of the contract).
     public var errorDescription: String? {
         switch self {
         case .accountExists(let id):

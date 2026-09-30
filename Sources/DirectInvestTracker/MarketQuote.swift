@@ -30,6 +30,8 @@ public struct MarketQuote: Codable, Hashable, Sendable, Comparable {
     /// never requires migrating stored data.
     public let source: String?
 
+    /// Memberwise init; normalizes `symbol` (trim + uppercase) like
+    /// ``EquityTicker`` so quotes key against positions directly.
     public init(
         symbol: String,
         currency: Currency,

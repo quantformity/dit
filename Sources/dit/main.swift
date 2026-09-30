@@ -25,6 +25,8 @@ enum Main {
 
     // MARK: - Entry point
 
+    /// Entry point: parse → dispatch → map failures to exit codes
+    /// (0 success · 1 runtime error · 2 usage error).
     static func main() async {
         let argv = Array(CommandLine.arguments.dropFirst())
         var invocation = Invocation()
@@ -69,6 +71,7 @@ enum Main {
     /// command word only while the command still accepts words, so
     /// `dit accounts TD` keeps `TD` as a positional and
     /// `dit --store PATH summary` still selects summary.
+    /// Split argv into global flags + the invocation (group, sub, rest).
     private static func parse(_ argv: [String]) throws -> (invocation: Invocation, global: Global) {
         var invocation = Invocation()
         var global = Global()
@@ -167,6 +170,8 @@ enum Main {
 
     // MARK: - Dispatch
 
+    /// Route the invocation to its command function (each command
+    /// validates its own options and resolves its own references).
     private static func run(_ invocation: Invocation, global: Global) async throws {
         // --json is only honored where a schema exists; anywhere else it
         // is a usage error, never a silent fallback to table text (an

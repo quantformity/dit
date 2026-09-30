@@ -8,9 +8,13 @@ import Foundation
 public struct DailySeries: Sendable {
     /// The provider-side ticker queried (e.g. "CAD=X"), for reporting.
     public let symbol: String
+    /// The currency the closes are denominated in (quote currency for
+    /// FX pairs; `.unknown` when the provider did not say).
     public let currency: Currency
+    /// The fetched closes; may be empty (= "provider knows nothing").
     public let points: [DailyPrice]
 
+    /// Memberwise init for provider adapters and test fakes.
     public init(symbol: String, currency: Currency, points: [DailyPrice]) {
         self.symbol = symbol
         self.currency = currency
@@ -34,14 +38,20 @@ public protocol PriceDataProvider: QuoteProvider {
 
 /// An inclusive range of UTC days during which something was held.
 public struct DayWindow: Hashable, Sendable {
+    /// First held day (a buy day counts).
     public var start: Date
+    /// Last held day (the sold-to-zero day still counts; an open
+    /// position runs through the window's end).
     public var end: Date
 
+    /// Normalizes both bounds to UTC calendar days (see ``DailyPrice/utcDay(_:)``).
     public init(start: Date, end: Date) {
         self.start = DailyPrice.utcDay(start)
         self.end = DailyPrice.utcDay(end)
     }
 
+    /// Whether `day` falls inside the window, bounds inclusive — after
+    /// normalizing `day` to its UTC calendar day.
     public func contains(_ day: Date) -> Bool {
         let day = DailyPrice.utcDay(day)
         return day >= start && day <= end
@@ -137,9 +147,14 @@ extension Portfolio {
 /// latest section of `market show`). Human-table display data — the
 /// machine contract does not use these.
 public struct LatestRow: Sendable {
+    /// Symbol or FX pair label ("TSLA.NE", "USD/CAD").
     public let name: String
+    /// Price pre-rendered for the table (display-grouped text, not a
+    /// machine value — see docs/json.md for the machine contract).
     public let price: String
+    /// Currency column text ("?" when unknown).
     public let ccy: String
+    /// "As of" column text, local time.
     public let asOf: String
 }
 
@@ -150,12 +165,19 @@ public struct LatestRow: Sendable {
 /// run. Coverage is the fact worth printing; "skipped" chatter was
 /// just the absence of a fact.
 public struct HistoryRow: Sendable {
+    /// Series key (symbol or pair).
     public let name: String
+    /// Earliest stored day ("—" when empty).
     public let first: String
+    /// Latest stored day ("—" when empty).
     public let last: String
+    /// Total stored points after the run.
     public let count: Int
+    /// Points newly written this run.
     public let added: Int
 
+    /// Memberwise init used by the update engine to build the
+    /// post-run coverage table.
     public init(name: String, first: String, last: String, count: Int, added: Int) {
         self.name = name
         self.first = first
@@ -218,6 +240,8 @@ public struct MarketUpdater: Sendable {
     let provider: any PriceDataProvider
     let store: MarketStore
 
+    /// Injects the provider and the store; tests pass fakes so the
+    /// watermark/merge rules run without a network.
     public init(provider: any PriceDataProvider, store: MarketStore) {
         self.provider = provider
         self.store = store
@@ -405,6 +429,7 @@ public struct MarketUpdater: Sendable {
 
     // MARK: Helpers
 
+    /// Long human timestamp for table headers (local time).
     static func stamp(_ date: Date?) -> String {
         guard let date else { return "unknown time" }
         let formatter = DateFormatter()
@@ -435,10 +460,12 @@ public struct MarketUpdater: Sendable {
         TextFormat.minuteClock(date)
     }
 
+    /// `YYYY-MM-DD` display shorthand (delegates to TextFormat).
     static func stampDay(_ date: Date) -> String {
         TextFormat.day(date)
     }
 
+    /// Grouped quantity text for human tables (delegates to TextFormat).
     static func trim(_ amount: Decimal) -> String {
         TextFormat.quantity(amount)
     }

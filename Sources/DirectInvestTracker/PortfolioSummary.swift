@@ -15,6 +15,7 @@ public struct TickerHolding: Hashable, Sendable {
     /// The currency the shares are held and (when quoted) priced in.
     public let currency: Currency
 
+    /// Total shares of this symbol held in `currency` across accounts.
     public let shares: Decimal
     /// Weighted average total cost per share, fees included.
     public let averageCostPerShare: Decimal
@@ -128,11 +129,17 @@ public struct PortfolioSummary: Hashable, Sendable {
 
     // MARK: Per-currency (exact — no conversion involved)
 
+    /// Cash left per currency, summed across accounts.
     public let cashByCurrency: [Currency: Decimal]
+    /// Market/cost value of equity positions per currency.
     public let positionValueByCurrency: [Currency: Decimal]
+    /// Live GIC principal per currency.
     public let gicValueByCurrency: [Currency: Decimal]
+    /// Booked P&L per currency.
     public let realizedPnLByCurrency: [Currency: Decimal]
+    /// Dividends received per currency.
     public let dividendsByCurrency: [Currency: Decimal]
+    /// Mark-to-market P&L per currency (quoted positions only).
     public let unrealizedPnLByCurrency: [Currency: Decimal]
     /// One-day P&L per currency (native, exact) — the change since each
     /// position's previous available close. Empty without daily data.
@@ -150,7 +157,12 @@ public struct PortfolioSummary: Hashable, Sendable {
 
     // MARK: Combined in `displayCurrency` (`nil` when not convertible)
 
+    /// The combined totals below are the per-currency maps converted
+    /// into `displayCurrency`; `nil` means a component could not be
+    /// converted (never "zero").
     public let cash: Decimal?
+    /// `nil` when any position's currency lacks a rate to the display
+    /// currency (positions stay exact in `positionValueByCurrency`).
     public let positionValue: Decimal?
     public let gicValue: Decimal?
     public let realizedPnL: Decimal?
@@ -169,6 +181,8 @@ public struct PortfolioSummary: Hashable, Sendable {
     /// that quietly ignore a sale below zero.
     public let untrackedShorts: [ShortSaleFlag]
 
+    /// Full memberwise init (tests and the JSON layer build summaries
+    /// literally; production goes through `Portfolio.summary(displayCurrency:quotes:fx:)`).
     public init(
         displayCurrency: Currency,
         accounts: [AccountBalances],
@@ -214,12 +228,17 @@ public struct PortfolioSummary: Hashable, Sendable {
 
 /// One recorded sale below zero: where it happened and how far below.
 public struct ShortSaleFlag: Hashable, Sendable {
+    /// Display name of the account where the oversold sale happened
+    /// ("(unknown account)" if its account row is gone).
     public let accountName: String
+    /// Normalized ticker symbol sold below zero.
     public let symbol: String
+    /// Currency the short exposure sits in.
     public let currency: Currency
     /// Shares sold beyond the tracked long (aggregated per symbol).
     public let shares: Decimal
 
+    /// Memberwise init used by the per-account replay and the summary rollup.
     public init(accountName: String, symbol: String, currency: Currency, shares: Decimal) {
         self.accountName = accountName
         self.symbol = symbol

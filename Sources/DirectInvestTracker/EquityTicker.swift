@@ -34,8 +34,12 @@ public struct EquityTicker: Identifiable, Codable, Hashable, Sendable {
     /// Free-form notes.
     public var notes: String?
 
+    /// Identity is the symbol (`Identifiable` conformance for SwiftUI-ish
+    /// tooling; the dictionary key in the store is the same string).
     public var id: String { symbol }
 
+    /// Memberwise init; normalizes `symbol` (trim + uppercase) so
+    /// registry keys match transaction tickers everywhere.
     public init(
         symbol: String,
         name: String? = nil,

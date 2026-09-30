@@ -41,14 +41,17 @@ extension Transaction {
 
     // MARK: Formatting helpers (deterministic, locale-free)
 
+    /// Exact decimal text (Decimal.description, no rounding/scientific).
     static func exact(_ amount: Decimal) -> String {
         "\(amount)" // Decimal prints exactly; no scientific notation
     }
 
+    /// First 8 UUID characters — the `tx list` ID spelling.
     static func shortID(_ id: UUID) -> String {
         String(id.uuidString.prefix(8))
     }
 
+    /// `YYYY-MM-DD` (UTC) for embedding dates in summary lines.
     static func dayString(_ date: Date) -> String {
         TextFormat.day(date)
     }

@@ -24,6 +24,9 @@ public struct ExchangeRate: Codable, Hashable, Sendable, Comparable {
     /// Provider label, e.g. `"yahoo"`.
     public let source: String?
 
+    /// Memberwise init; does NOT reciprocate — a CAD/USD rate is
+    /// stored exactly as observed (reversal happens at lookup, see
+    /// ``MarketDataCache``).
     public init(
         base: Currency,
         quote: Currency,

@@ -14,6 +14,8 @@ public struct Tag: Codable, Hashable, Sendable, Comparable {
     /// The normalized tag value (trimmed, lowercased).
     public let rawValue: String
 
+    /// Normalizes on creation (trim + lowercase) — normalization is
+    /// the equality story, so never bypass it with a raw stored value.
     public init(_ value: String) {
         self.rawValue = value.trimmingCharacters(in: .whitespaces).lowercased()
     }
@@ -23,10 +25,13 @@ public struct Tag: Codable, Hashable, Sendable, Comparable {
 
     // MARK: Codable (bare string)
 
+    /// Decodes a bare string through ``init(_:)`` so stored tags get
+    /// re-normalized ("Dividend" in JSON still equals "dividend").
     public init(from decoder: Decoder) throws {
         self.init(try decoder.singleValueContainer().decode(String.self))
     }
 
+    /// Writes the bare normalized string (no wrapper object).
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
@@ -34,6 +39,8 @@ public struct Tag: Codable, Hashable, Sendable, Comparable {
 
     // MARK: Comparable
 
+    /// Sort by the lowercase value (display order is stable regardless
+    /// of how tags were typed).
     public static func < (lhs: Tag, rhs: Tag) -> Bool {
         lhs.rawValue < rhs.rawValue
     }

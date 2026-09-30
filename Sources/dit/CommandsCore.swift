@@ -6,6 +6,9 @@ import Foundation
 
 // MARK: - summary / accounts (read-only)
 
+/// `dit` (no command): the portfolio snapshot — per-account balances,
+/// holdings, and one-day change, valued from live quotes (or the
+/// market store when `--offline`).
 func summary(global: Global) async throws {
     let (store, configuration) = try openStore(global: global)
     guard let portfolio = try await store.load() else {
@@ -96,6 +99,7 @@ func summary(global: Global) async throws {
     print("Store: \(configuration.url.path)")
 }
 
+/// `dit accounts`: the account roster with what each currently holds.
 func accountsList(global: Global) async throws {
     let (store, configuration) = try openStore(global: global)
     guard let portfolio = try await store.load() else {

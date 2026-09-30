@@ -16,6 +16,8 @@ public struct MarketDataPlan: Hashable, Sendable {
     /// The currency `fxCurrencies` are rates against.
     public let hub: Currency
 
+    /// Memberwise init (built by ``Portfolio/marketDataPlan(displayCurrency:)``,
+    /// not by hand).
     public init(symbols: [String], fxCurrencies: [Currency], hub: Currency) {
         self.symbols = symbols
         self.fxCurrencies = fxCurrencies

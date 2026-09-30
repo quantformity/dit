@@ -7,15 +7,20 @@ import Foundation
 /// Ambiguity is reported, never guessed: candidates are listed so the
 /// user knows to type more characters.
 public struct TransactionRef: Sendable {
+    /// The reference as typed (full/dashed UUID or hex prefix).
     public let raw: String
 
+    /// Wraps a raw query; validation happens at ``resolve(in:)`` time.
     public init(_ raw: String) { self.raw = raw }
 
+    /// How transaction resolution can fail — ambiguity lists candidates
+    /// so the user knows to type more characters.
     public enum ResolutionError: LocalizedError, Equatable {
         case empty
         case notFound(query: String)
         case ambiguous(query: String, matches: [String])
 
+        /// CLI-ready message (printed verbatim as the error line).
         public var errorDescription: String? {
             switch self {
             case .empty:

@@ -10,7 +10,10 @@ import Foundation
 // statement cannot drift from the balances. Display only — nothing is
 // stored, and no position value is mixed into a cash column.
 
+/// One printed line of a ledger statement (display projection of a
+/// `Transaction` plus the cash state around it).
 public struct StatementRow: Sendable {
+    /// The event this row renders.
     public let transaction: Transaction
     /// Cash OUT of the account (positive amounts, tagged by currency).
     public let debits: [(currency: Currency, amount: Decimal)]
@@ -20,6 +23,7 @@ public struct StatementRow: Sendable {
     /// an empty list means the account holds no cash at this point.
     public let cashAfter: [(currency: Currency, amount: Decimal)]
 
+    /// Memberwise init (the replay builds rows; renderers consume them).
     public init(transaction: Transaction,
                 debits: [(currency: Currency, amount: Decimal)],
                 credits: [(currency: Currency, amount: Decimal)],
@@ -31,6 +35,8 @@ public struct StatementRow: Sendable {
     }
 }
 
+/// The statement replay engine: turns transaction order into the
+/// `tx list` columns (file header defines the exactness contract).
 public enum LedgerStatement {
 
     /// Replay ONE account's ledger into statement rows, carrying a

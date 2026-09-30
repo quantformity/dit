@@ -21,6 +21,8 @@ public actor FileDataStore: DataStore {
         self.fileManager = fileManager
     }
 
+    /// Writes the whole payload with `.atomic` (temp file + rename),
+    /// so a crash mid-save can never leave half a file under the key.
     public func save(_ payload: Data, key: String) async throws {
         do {
             try payload.write(to: fileURL(for: key), options: .atomic)
@@ -29,6 +31,8 @@ public actor FileDataStore: DataStore {
         }
     }
 
+    /// Reads the key's file; a missing file is `nil`, any other read
+    /// failure is an error (an unreadable store must not read as empty).
     public func load(key: String) async throws -> Data? {
         let url = fileURL(for: key)
         guard fileManager.fileExists(atPath: url.path) else { return nil }
@@ -39,6 +43,8 @@ public actor FileDataStore: DataStore {
         }
     }
 
+    /// Deletes the key's file. "No such file" passes quietly — the
+    /// protocol requires delete to be idempotent.
     public func delete(key: String) async throws {
         do {
             try fileManager.removeItem(at: fileURL(for: key))
@@ -52,6 +58,8 @@ public actor FileDataStore: DataStore {
         }
     }
 
+    /// The keys recoverable from `.dat` filenames, sorted. Non-`.dat`
+    /// files in the directory are ignored (stray backups stay invisible).
     public func keys() async throws -> [String] {
         do {
             return try fileManager

@@ -44,6 +44,7 @@ public struct DataStoreFactory: Sendable {
             case sqlite
         }
 
+        /// Which backend to build (from `DIT_BACKEND`, default `.file`).
         public var backend: Backend
         /// Directory (for `.file`) or database file path (for `.sqlite`).
         public var url: URL

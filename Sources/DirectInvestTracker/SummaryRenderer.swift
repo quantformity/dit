@@ -5,6 +5,8 @@ import Foundation
 /// (no locale-dependent measurement) so the same summary always renders
 /// the same way.
 public enum Table {
+    /// Render a full table (header rule included) with columns aligned
+    /// to the widest cell per column.
     public static func render(headers: [String], rows: [[String]], leftColumns: Set<Int> = [0]) -> [String] {
         let columns = headers.count
         let widths = (0..<columns).map { column in

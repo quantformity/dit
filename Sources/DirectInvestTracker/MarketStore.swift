@@ -17,6 +17,8 @@ public struct DailyPrice: Codable, Hashable, Sendable {
     /// same day.
     public var via: String?
 
+    /// Normalizes `day` to its UTC calendar day (see ``day``) so any
+    /// exchange-local timestamp collapses onto the same storage key.
     public init(day: Date, price: Decimal, via: String? = nil) {
         self.day = DailyPrice.utcDay(day)
         self.price = price
@@ -50,6 +52,8 @@ public struct PriceSeries: Codable, Hashable, Sendable {
     /// re-requested forever, while genuinely new days do not.
     public var coveredThrough: Date?
 
+    /// Sorts + de-duplicates `points` through ``normalized(_:)`` so a
+    /// hand-built series cannot violate the day-unique invariant.
     public init(symbol: String, currency: Currency, points: [DailyPrice] = [],
                 coveredThrough: Date? = nil) {
         self.symbol = symbol
@@ -115,12 +119,18 @@ public struct PriceSeries: Codable, Hashable, Sendable {
 ///   overwritten by `dit market latest` ("keep only the latest");
 /// - `series`: the daily history filled by `dit market history`.
 public struct MarketData: Codable, Hashable, Sendable {
+    /// When the market store was last written (`nil` = never). Display
+    /// metadata, not a data point.
     public var updatedAt: Date?
+    /// The "latest snapshot" section: at most one entry per symbol.
     public var latestQuotes: [MarketQuote]
+    /// The "latest snapshot" section for FX: at most one entry per pair.
     public var latestRates: [ExchangeRate]
     /// Keyed by symbol/pair (same key as inside `MarketQuote`/series).
     public var series: [String: PriceSeries]
 
+    /// Empty-by-default memberwise init: an unseeded store decodes to
+    /// this, and tests can build documents literally.
     public init(
         updatedAt: Date? = nil,
         latestQuotes: [MarketQuote] = [],

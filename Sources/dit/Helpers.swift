@@ -94,11 +94,15 @@ func portfolioForMutation(global: Global) async throws
 
 // MARK: Entry helpers
 
+/// Usage gate: commands that take no positional arguments reject
+/// stray ones with `hint` (positional typos must not be ignored).
 func rejectPositionals(_ options: Options, hint: String) throws {
     guard let first = options.positionals.first else { return }
     throw ParseError("unexpected argument '\(first)' — \(hint)")
 }
 
+/// Normalize a symbol for use as a key (trim + uppercase); empty is
+/// a usage error.
 func requireSymbol(_ raw: String) throws -> String {
     let symbol = raw.trimmingCharacters(in: .whitespaces).uppercased()
     guard !symbol.isEmpty else { throw ParseError("--ticker cannot be empty") }
@@ -112,6 +116,8 @@ func entryCurrency(_ options: Options, fallback: Currency) throws -> Currency {
     return try parseCurrency(raw, option: "--currency")
 }
 
+/// Parse a currency code for an option (exact, then case-insensitive);
+/// unknown codes are a usage error naming the option they came from.
 func parseCurrency(_ raw: String, option: String) throws -> Currency {
     if let exact = Currency(rawValue: raw), exact != .unknown { return exact }
     if let match = Currency.allCases.first(where: { $0.rawValue.lowercased() == raw.lowercased() }),
@@ -154,6 +160,8 @@ func normalizeToken(_ raw: String) -> String {
         .replacingOccurrences(of: "_", with: "")
 }
 
+/// `--kind` / subcommand spellings mapped to canonical kind names
+/// (keys arrive through ``normalizeToken(_:)``).
 let kindAliases: [String: String] = [
     "deposit": "deposit",
     "withdraw": "withdrawal", "withdrawal": "withdrawal",
@@ -165,6 +173,8 @@ let kindAliases: [String: String] = [
     "fx": "fxConversion", "fxconversion": "fxConversion",
 ]
 
+/// Strict decimal parse for an option (no grouping, no locale); a
+/// bad number is a usage error, never a silent zero.
 func parseDecimal(_ raw: String, option: String) throws -> Decimal {
     let trimmed = raw.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty, let value = Decimal(string: trimmed) else {
@@ -173,6 +183,8 @@ func parseDecimal(_ raw: String, option: String) throws -> Decimal {
     return value
 }
 
+/// Resolve `--taxable` / `--non-taxable` to nil/true/false; passing
+/// both with opposite answers is a usage error.
 func taxableFlag(_ options: Options) throws -> Bool? {
     var answers: [Bool] = []
     if let taxable = options.flag("taxable") { answers.append(taxable) }
@@ -183,6 +195,8 @@ func taxableFlag(_ options: Options) throws -> Bool? {
     return answers.first
 }
 
+/// Strict `YYYY-MM-DD` parse (UTC midnight); shape AND calendar are
+/// checked, so "2026-02-30" fails instead of rolling over.
 func parseDate(_ raw: String) throws -> Date {
     let parts = raw.split(separator: "-", omittingEmptySubsequences: false)
     guard parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
@@ -195,6 +209,7 @@ func parseDate(_ raw: String) throws -> Date {
     return date
 }
 
+/// UTC-midnight date from components, `nil` if the day does not exist.
 func utcDate(year: Int, month: Int, day: Int) -> Date? {
     var components = DateComponents()
     components.year = year
@@ -206,10 +221,12 @@ func utcDate(year: Int, month: Int, day: Int) -> Date? {
     return calendar.date(from: components)
 }
 
+/// Display form `YYYY-MM-DD` (UTC).
 func shortDate(_ date: Date) -> String {
     TextFormat.day(date)
 }
 
+/// Table money with the currency tag ("USD 1,234.57").
 func money(_ amount: Decimal, _ currency: Currency) -> String {
     "\(currency.rawValue) \(TextFormat.money(amount))"
 }
@@ -220,6 +237,7 @@ func amountOnly(_ amount: Decimal) -> String {
     TextFormat.money(amount)
 }
 
+/// Table quantity (grouped, untagged).
 func trim(_ amount: Decimal) -> String {
     TextFormat.quantity(amount)
 }
@@ -266,6 +284,7 @@ func confirm(_ message: String, yes: Bool) -> Bool {
     return line.trimmingCharacters(in: .whitespaces).lowercased() == "yes"
 }
 
+/// Write one line to stderr (machine output on stdout stays clean).
 func printErr(_ line: String) {
     FileHandle.standardError.write(Data((line + "\n").utf8))
 }

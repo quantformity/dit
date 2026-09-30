@@ -8,15 +8,20 @@ import Foundation
 /// lists them, so the user can disambiguate with a longer prefix or
 /// the full UUID.
 public struct AccountRef: Sendable {
+    /// The reference as the user typed it (name or UUID/prefix).
     public let raw: String
 
+    /// Wraps a raw query; validation happens at ``resolve(in:)`` time.
     public init(_ raw: String) { self.raw = raw }
 
+    /// How account resolution can fail — always a message telling the
+    /// user what to type instead.
     public enum ResolutionError: LocalizedError, Equatable {
         case empty
         case notFound(query: String)
         case ambiguous(query: String, matches: [String])
 
+        /// CLI-ready message (printed verbatim as the error line).
         public var errorDescription: String? {
             switch self {
             case .empty:

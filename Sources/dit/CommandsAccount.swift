@@ -6,6 +6,8 @@ import Foundation
 
 // MARK: - account commands
 
+/// `account show <ref> [--history]`: balances snapshot (cash per
+/// currency, positions, GICs) and, with `--history`, the ledger rows.
 func accountShow(_ args: [String], global: Global) async throws {
     let options = try Options(args, flagOptions: ["history"])
     guard let reference = options.positionals.first else {
@@ -100,6 +102,8 @@ func accountShow(_ args: [String], global: Global) async throws {
     }
 }
 
+/// `account add`: creates an account (currency/taxable/dates validated
+/// here; uniqueness and date order by the mutation).
 func accountAdd(_ args: [String], global: Global) async throws {
     let options = try Options(
         args,
@@ -128,6 +132,7 @@ func accountAdd(_ args: [String], global: Global) async throws {
     print("id: \(account.id.uuidString)")
 }
 
+/// `account edit <ref>`: value-only update of an account record.
 func accountEdit(_ args: [String], global: Global) async throws {
     let options = try Options(
         args,
@@ -158,6 +163,7 @@ func accountEdit(_ args: [String], global: Global) async throws {
     for note in notes { print(note) }
 }
 
+/// `account close <ref> [--date]`: marks the account closed.
 func accountClose(_ args: [String], global: Global) async throws {
     let options = try Options(args, valueOptions: ["date"])
     guard let reference = options.positionals.first else {
@@ -171,6 +177,8 @@ func accountClose(_ args: [String], global: Global) async throws {
     for note in notes { print(note) }
 }
 
+/// `account delete <ref> [--force] [--yes]`: destructive — prints the
+/// transaction impact and confirms (or requires `--yes` off-TTY).
 func accountDelete(_ args: [String], global: Global) async throws {
     let options = try Options(args, flagOptions: ["force", "yes"])
     guard let reference = options.positionals.first else {
@@ -202,6 +210,7 @@ func accountDelete(_ args: [String], global: Global) async throws {
 
 // MARK: - ticker commands
 
+/// `ticker list` / `dit tickers`: the instrument registry, sorted.
 func tickerList(global: Global) async throws {
     let (store, configuration) = try openStore(global: global)
     guard let portfolio = try await store.load() else {
@@ -227,6 +236,8 @@ func tickerList(global: Global) async throws {
     }
 }
 
+/// `ticker show <SYMBOL>`: one registry entry (display metadata only
+/// — positions come from the ledger).
 func tickerShow(_ args: [String], global: Global) async throws {
     let options = try Options(args)
     guard let symbolRaw = options.positionals.first else {
@@ -248,6 +259,8 @@ func tickerShow(_ args: [String], global: Global) async throws {
     print("  Referenced by \(portfolio.transactions(for: entry.symbol).count) transaction(s)")
 }
 
+/// `ticker add <SYMBOL>`: registers an instrument (duplicate symbols
+/// rejected by the mutation).
 func tickerAdd(_ args: [String], global: Global) async throws {
     let options = try Options(
         args, valueOptions: ["name", "currency", "tags", "notes"])
@@ -273,6 +286,7 @@ func tickerAdd(_ args: [String], global: Global) async throws {
     for note in notes { print(note) }
 }
 
+/// `ticker edit <SYMBOL>`: value-only update of a registry entry.
 func tickerEdit(_ args: [String], global: Global) async throws {
     let options = try Options(
         args, valueOptions: ["name", "currency", "tags", "notes"])
@@ -304,6 +318,8 @@ func tickerEdit(_ args: [String], global: Global) async throws {
     for note in notes { print(note) }
 }
 
+/// `ticker delete <SYMBOL> [--yes]`: removes the registry entry only —
+/// transactions keep working (the registry is optional enrichment).
 func tickerDelete(_ args: [String], global: Global) async throws {
     let options = try Options(args, flagOptions: ["yes"])
     guard let symbolRaw = options.positionals.first else {

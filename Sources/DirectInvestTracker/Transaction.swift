@@ -17,20 +17,29 @@ import Foundation
 /// stores its amount directly, while a stock trade derives it from
 /// `shares × price`. The common access point is the computed `amount`.
 public struct Transaction: Identifiable, Codable, Hashable, Sendable {
+    /// Stable identity (the `tx list` ID column; prefixes resolve via
+    /// ``TransactionRef``).
     public let id: UUID
+    /// When the event happened (account-local calendar date).
     public var date: Date
+    /// Where it happened — a reference to an `Account`, not a copy.
     public var accountID: UUID
+    /// The currency the event's amounts are expressed in.
     public var currency: Currency
+    /// What type of event it was (and its payload).
     public var kind: Kind
     /// Brokerage fee, in `currency`, if any.
     /// Not included in the kind's amounts — see `cashImpact`.
     public var fee: Decimal?
+    /// Free-form user note about the event.
     public var notes: String?
     /// The institution's own reference for this event (e.g. a trade
     /// confirmation number). Enables de-duplication when importing
     /// statement CSVs.
     public var externalID: String?
 
+    /// Memberwise init; `id` defaults to a fresh UUID so callers
+    /// rarely pass one (tests pin ids for reproducibility).
     public init(
         id: UUID = UUID(),
         date: Date,

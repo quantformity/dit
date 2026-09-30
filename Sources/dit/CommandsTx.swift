@@ -6,6 +6,8 @@ import Foundation
 
 // MARK: - tx commands
 
+/// Routes `dit tx …` subcommands; a bare 8+ hex token is treated as
+/// a transaction reference (`dit tx 9F2C6D1A` shows that transaction).
 func txCommand(_ sub: String, _ args: [String], global: Global) async throws {
     // 'dit tx 9F2C6D1A' shows that transaction: a run of 8+ hex
     // characters is a reference, never a subcommand word.
@@ -43,6 +45,9 @@ func txCommand(_ sub: String, _ args: [String], global: Global) async throws {
     }
 }
 
+/// `tx list`: the ledger statement — per-currency cash columns when
+/// the shown history spans 2–4 currencies, plus replay-ordered rows
+/// (this is where the statement view lives; filters select history).
 func txList(_ args: [String], global: Global) async throws {
     let options = try Options(
         args,
@@ -200,6 +205,8 @@ func txList(_ args: [String], global: Global) async throws {
     }
 }
 
+/// `tx show <id>`: one transaction in full (exact decimals; `--json`
+/// adds the machine detail keys).
 func txShow(_ args: [String], global: Global) async throws {
     let options = try Options(args)
     guard let reference = options.positionals.first else {
@@ -224,6 +231,8 @@ func txShow(_ args: [String], global: Global) async throws {
     print("  Fee:       \(tx.fee.map { money($0, tx.currency) } ?? "—")")
 }
 
+/// Shared body of `tx deposit` / `tx withdrawal` (`deposit:` picks
+/// the direction); currency defaults to the account's reporting one.
 func txCashEntry(deposit: Bool, _ args: [String], global: Global) async throws {
     let options = try Options(
         args,
@@ -264,6 +273,9 @@ func txCashEntry(deposit: Bool, _ args: [String], global: Global) async throws {
 
 // MARK: Entry commands — buy, sell, dividend, gic, gic-redeem, fx
 
+/// Shared body of `tx buy` / `tx sell` (`buy:` picks the direction).
+/// Price comes from `--price`, else a live quote; a sale beyond the
+/// tracked long records but warns (the short is outside the model).
 func txTrade(buy: Bool, _ args: [String], global: Global) async throws {
     let options = try Options(
         args,
@@ -343,6 +355,7 @@ func txTrade(buy: Bool, _ args: [String], global: Global) async throws {
     if let shortNote { print(shortNote) }
 }
 
+/// `tx dividend`: records a dividend received for a ticker.
 func txDividend(_ args: [String], global: Global) async throws {
     let options = try Options(
         args,
@@ -372,6 +385,8 @@ func txDividend(_ args: [String], global: Global) async throws {
     for note in notes { print(note) }
 }
 
+/// `tx gic`: opens a GIC (principal, rate %, maturity, compounding);
+/// accrued interest is not modeled until redemption.
 func txGicPurchase(_ args: [String], global: Global) async throws {
     let options = try Options(
         args,
@@ -417,6 +432,8 @@ func txGicPurchase(_ args: [String], global: Global) async throws {
         + " — correct with 'dit tx edit <id>' if that is wrong")
 }
 
+/// `tx gic-redeem`: redeems a recorded GIC purchase (by id/prefix)
+/// for `--proceeds`; a dangling purchase reference is refused.
 func txGicRedeem(_ args: [String], global: Global) async throws {
     let options = try Options(
         args,
@@ -453,6 +470,8 @@ func txGicRedeem(_ args: [String], global: Global) async throws {
     }
 }
 
+/// `tx fx`: a currency conversion recorded as ONE event with two
+/// legs (source out, target in; `--fee` rides the incoming leg).
 func txFx(_ args: [String], global: Global) async throws {
     let options = try Options(
         args,
@@ -625,6 +644,8 @@ func editedKind(tx: Transaction, options: Options) throws -> Transaction.Kind? {
     }
 }
 
+/// `tx delete <id> [--yes]`: destructive — prints what is being
+/// removed and confirms (or requires `--yes` off-TTY).
 func txDelete(_ args: [String], global: Global) async throws {
     let options = try Options(args, flagOptions: ["yes"])
     guard let reference = options.positionals.first else {

@@ -8,10 +8,14 @@ import Foundation
 /// - `transactions` — the first-class event log (source of truth)
 /// - `tickers` — the instrument registry (display metadata)
 public struct Portfolio: Codable, Hashable, Sendable {
+    /// Where the money is held (order = creation order; display sorts by name).
     public var accounts: [Account]
+    /// The event log — source of truth, appended/edited only via mutations.
     public var transactions: [Transaction]
+    /// Instrument registry (optional display metadata keyed by symbol).
     public var tickers: [EquityTicker]
 
+    /// Memberwise init; empty by default (a fresh portfolio is valid).
     public init(
         accounts: [Account] = [],
         transactions: [Transaction] = [],
@@ -24,6 +28,8 @@ public struct Portfolio: Codable, Hashable, Sendable {
 
     // MARK: Lookups
 
+    /// Account by exact id, `nil` when absent (dangling references must
+    /// stay reportable, not crash).
     public subscript(account id: UUID) -> Account? {
         accounts.first { $0.id == id }
     }
@@ -35,6 +41,8 @@ public struct Portfolio: Codable, Hashable, Sendable {
         return tickers.first { $0.symbol == normalized }
     }
 
+    /// The account's own transactions, in storage order (use
+    /// ``Replay/ordered(_:date:)`` when display must match replay).
     public func transactions(in accountID: UUID) -> [Transaction] {
         transactions.filter { $0.accountID == accountID }
     }

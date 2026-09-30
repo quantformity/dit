@@ -58,6 +58,9 @@ func parseTags(_ raw: String?) -> Set<Tag> {
 
 // MARK: - quote
 
+/// `dit quote <SYMBOL|PAIR|CHAIN> …`: live quotes; `--as-of` reroutes
+/// to stored single-day mode, `--from/--to` to range mode, a 3+ code
+/// chain token to the matrix printer.
 func quoteLookup(_ first: String, _ rest: [String], global: Global) async throws {
     let options = try Options(rest, valueOptions: ["as-of", "from", "to"])
     if options["as-of"] != nil, options["from"] != nil || options["to"] != nil {
@@ -180,6 +183,8 @@ func quoteLookup(_ first: String, _ rest: [String], global: Global) async throws
 /// `backfilled — derived via …` (a model value: underlying × FX ÷
 /// calibrated ratio), or nothing. A date with no quote on it
 /// reports the nearest earlier one and how far back it had to go.
+/// Single-day mode: prices/rates as of one historical day, read from
+/// the market store (never the network unless refill needs it).
 func quoteAsOf(_ rawSymbols: [String], asOf: Date, global: Global) async throws {
     let symbols = try rawSymbols.map { try requireSymbol($0) }
     let (marketStore, configuration) = try openMarketStore(global: global)
@@ -239,6 +244,8 @@ func quoteAsOf(_ rawSymbols: [String], asOf: Date, global: Global) async throws 
 /// first, with the same provenance words as --as-of. Missing
 /// symbols are listed, not hidden; only a run where NOTHING is
 /// stored in range exits non-zero.
+/// Range mode: day-by-day closes between `--from`/`--to` printed as
+/// bar charts (ChartRenderer does the drawing; no money math here).
 func quoteRange(_ rawSymbols: [String], from: Date?, to: Date?, global: Global) async throws {
     let symbols = try rawSymbols.map { try requireSymbol($0) }
     let (marketStore, configuration) = try openMarketStore(global: global)
@@ -307,6 +314,8 @@ func quoteRange(_ rawSymbols: [String], from: Date?, to: Date?, global: Global) 
 /// refused by the caller: a matrix is single-day by design.
 /// Anything not a direct observation is built from USD legs and
 /// marked triangulated — never presented as a quote.
+/// Currency-chain cross table ("USD/CAD/HKD"): pairwise rates, with
+/// triangulated cells marked (never presented as observations).
 func quoteMatrix(_ currencies: [Currency], token: String,
                                 asOfRaw: String?, global: Global) async throws {
     let asOf: Date?
@@ -430,6 +439,8 @@ func marketPortfolio(global: Global) async throws -> Portfolio? {
     return portfolio
 }
 
+/// `market latest`: refresh the one latest snapshot per held symbol
+/// and needed FX pair (refuses `--offline` — there is nothing to refresh).
 func marketLatest(global: Global) async throws {
     guard !global.offline else {
         throw ParseError("'dit market latest' refreshes prices from the provider — "
@@ -458,6 +469,9 @@ func marketLatest(global: Global) async throws {
     print("next: 'dit market history' fills daily closes for every held day")
 }
 
+/// `market history`: fill daily closes for the days each symbol was
+/// actually held (incremental by default; `--all` re-verifies, `--rebuild`
+/// erases first).
 func marketHistory(_ args: [String], global: Global) async throws {
     guard !global.offline else {
         throw ParseError("'dit market history' fetches daily closes — "
@@ -516,6 +530,8 @@ func marketHistory(_ args: [String], global: Global) async throws {
     }
 }
 
+/// `market show`: print what the market store currently holds (latest
+/// section + per-series coverage), with `--symbol`/`--days` filters.
 func marketShow(_ args: [String], global: Global) async throws {
     let options = try Options(args, valueOptions: ["symbol", "days"])
     guard options.positionals.isEmpty else {
@@ -617,6 +633,9 @@ func marketShow(_ args: [String], global: Global) async throws {
 /// over derived values on the same day — the import path is how
 /// measured data (an old app's cache, a vendor file) retires the
 /// model's guesses.
+/// `market import <file> [--dry-run]`: bulk-load daily closes from
+/// text (`SYMBOL,DATE,PRICE[,BASIS]` lines); malformed lines are
+/// reported, not repaired.
 func marketImport(_ args: [String], global: Global) async throws {
     let options = try Options(args, flagOptions: ["dry-run"])
     guard options.positionals.count == 1 else {

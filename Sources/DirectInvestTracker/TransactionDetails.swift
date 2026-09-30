@@ -20,6 +20,9 @@ public struct StockDetails: Codable, Hashable, Sendable {
     /// Total trade value: `shares × price`.
     public var amount: Decimal { shares * price }
 
+    /// Normalizes `ticker` (trimmed, uppercased) so symbols compare
+    /// equal everywhere — the registry, filters, and P&L pairing all
+    /// rely on this one normalization point.
     public init(ticker: String, shares: Decimal, price: Decimal) {
         self.ticker = ticker.trimmingCharacters(in: .whitespaces).uppercased()
         self.shares = shares
@@ -48,10 +51,14 @@ public enum GICCompounding: String, Codable, CaseIterable, Sendable {
 public struct GICDetails: Codable, Hashable, Sendable {
     /// The issuer's product name, e.g. `"5-Year Prime+ GIC"`.
     public var product: String
+    /// The amount locked in, in the transaction's currency.
     public var principal: Decimal
     /// Annual interest rate **as a fraction**: `0.047` = 4.7% p.a.
     /// Stored compute-ready; format as a percentage for display.
     public var rate: Decimal
+    /// How the stated annual rate compounds. Display + future
+    /// interest math only — redemption facts stay measured, never
+    /// recomputed from this assumption.
     public var compounding: GICCompounding
     /// The contractual maturity date.
     /// Store the date, not a "5-year" label — issuers apply business-day
@@ -60,6 +67,8 @@ public struct GICDetails: Codable, Hashable, Sendable {
     /// Whether the GIC can be redeemed before maturity.
     public var redeemable: Bool
 
+    /// Records the contract exactly as agreed at purchase (the CLI's
+    /// `--rate` is a percentage and is divided by 100 before it gets here).
     public init(
         product: String,
         principal: Decimal,
@@ -85,6 +94,7 @@ public struct GICRedemptionDetails: Codable, Hashable, Sendable {
     /// value after an early-redemption penalty.
     public var proceeds: Decimal
 
+    /// Links the redemption to its purchase transaction.
     public init(purchaseID: UUID, proceeds: Decimal) {
         self.purchaseID = purchaseID
         self.proceeds = proceeds
@@ -95,10 +105,12 @@ public struct GICRedemptionDetails: Codable, Hashable, Sendable {
 
 /// A cash dividend received from a holding.
 public struct DividendDetails: Codable, Hashable, Sendable {
+    /// Paying instrument, normalized on init.
     public var ticker: String
     /// Total cash received, in the transaction's currency.
     public var amount: Decimal
 
+    /// Normalizes `ticker` the same way ``StockDetails/init(ticker:shares:price:)`` does.
     public init(ticker: String, amount: Decimal) {
         self.ticker = ticker.trimmingCharacters(in: .whitespaces).uppercased()
         self.amount = amount
@@ -126,6 +138,8 @@ public struct FXDetails: Codable, Hashable, Sendable {
         fromAmount == 0 ? nil : toAmount / fromAmount
     }
 
+    /// Records both measured legs; the rate is never entered, only
+    /// derived (see ``rate``).
     public init(fromCurrency: Currency, fromAmount: Decimal, toAmount: Decimal) {
         self.fromCurrency = fromCurrency
         self.fromAmount = fromAmount

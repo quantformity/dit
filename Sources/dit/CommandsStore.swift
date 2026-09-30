@@ -6,6 +6,7 @@ import Foundation
 
 // MARK: - store commands
 
+/// Timestamp label for backup/export filenames (UTC, sort-friendly).
 func fileStamp(_ date: Date = Date()) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -14,6 +15,8 @@ func fileStamp(_ date: Date = Date()) -> String {
     return formatter.string(from: date)
 }
 
+/// `store path`: where the portfolio and market stores live (and
+/// whether the portfolio is readable from there).
 func storePath(global: Global) async throws {
     let (store, configuration) = try openStore(global: global)
     var body = [
@@ -35,6 +38,9 @@ func storePath(global: Global) async throws {
     }
 }
 
+/// `store export [--to FILE] [--account NAME]`: portable JSON (atomic
+/// write; default target sits beside the store). Multi-account exports
+/// warn — import needs one account per file.
 func storeExport(_ args: [String], global: Global) async throws {
     let options = try Options(args, valueOptions: ["to", "account"])
     guard options.positionals.isEmpty else {
@@ -137,6 +143,7 @@ func backupStore(global: Global, to directory: URL? = nil) throws -> [URL] {
     return copies
 }
 
+/// `store backup [--to DIR]`: timestamped copies of the store data.
 func storeBackup(_ args: [String], global: Global) async throws {
     let options = try Options(args, valueOptions: ["to"])
     guard options.positionals.isEmpty else {
@@ -150,6 +157,10 @@ func storeBackup(_ args: [String], global: Global) async throws {
     }
 }
 
+/// `store import <file> [--merge|--force] [--yes]`: single-account
+/// import, replace (default) or merge. Replace confirms (skippable
+/// with `--yes`) and takes an automatic pre-import backup (skippable
+/// with `--force`); a bad file is refused before either happens.
 func storeImport(_ args: [String], global: Global) async throws {
     let options = try Options(args, flagOptions: ["merge", "force", "yes"])
     guard let raw = options.positionals.first else {

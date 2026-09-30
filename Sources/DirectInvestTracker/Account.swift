@@ -12,6 +12,9 @@ import Foundation
 public struct Account: Identifiable, Codable, Hashable, Sendable {
     // MARK: Identity
 
+    /// Stable identity — the link key every transaction points back to.
+    /// Decoding REQUIRES it (a record that cannot be attributed to an
+    /// account is unusable), unlike the cosmetic fields below.
     public let id: UUID
 
     // MARK: Reporting
@@ -50,6 +53,10 @@ public struct Account: Identifiable, Codable, Hashable, Sendable {
 
     // MARK: Init
 
+    /// Designated init. Every field has a default, so tests and
+    /// imports can build an account compactly; CLI-created accounts get
+    /// a fresh `UUID` and default to taxable + CAD reporting unless the
+    /// flags say otherwise.
     public init(
         id: UUID = UUID(),
         reportingCurrency: Currency = .cad,

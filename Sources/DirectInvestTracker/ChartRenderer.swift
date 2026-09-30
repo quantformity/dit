@@ -12,11 +12,18 @@ import Foundation
 // forces the plain tier (#, ^, -) for cp936-style consoles, LANG=C
 // and byte-stable output. Column widths come from the caller.
 
+/// ASCII bar-chart renderer shared by `dit-chart` and the tests.
+///
+/// Pure presentation: rows carry already-formatted numbers; the
+/// renderer never converts money or re-implements financial semantics
+/// (see file header for the honesty rules it enforces).
 public enum ChartRenderer {
 
     // MARK: Chart model
 
+    /// One plottable line of a chart.
     public struct Row {
+        /// Left column (account, symbol, currency…).
         public let label: String
         /// nil = not plottable (unknown / unconvertible). Rendered
         /// dashed, never as a zero-length bar.
@@ -27,6 +34,8 @@ public enum ChartRenderer {
         /// observation.
         public let marker: String?
 
+        /// Builds a row; `marker` is only the provenance label ("*"),
+        /// the renderer does not decide whether data is derived.
         public init(label: String, value: Decimal?, trailing: String = "", marker: String? = nil) {
             self.label = label
             self.value = value
@@ -35,7 +44,9 @@ public enum ChartRenderer {
         }
     }
 
+    /// A complete chart: header, rows, and the legend explaining glyphs.
     public struct Chart {
+        /// First line of output.
         public let title: String
         /// Sub-caption explaining what the numbers ARE (units, base of
         /// percentages, native-ratio warnings).
@@ -43,9 +54,12 @@ public enum ChartRenderer {
         /// true = plus/minus bars around a zero line (equal scale
         /// both sides, like the backfill formula charts).
         public let signed: Bool
+        /// The lines to draw (order preserved — charts read top-down).
         public let rows: [Row]
+        /// Explanatory footer lines (glyph meanings, unit warnings).
         public let legend: [String]
 
+        /// Memberwise init; `signed: true` selects the zero-line layout.
         public init(title: String, note: String? = nil, signed: Bool,
                     rows: [Row], legend: [String] = []) {
             self.title = title
@@ -56,12 +70,16 @@ public enum ChartRenderer {
         }
     }
 
+    /// Everything a render run can refuse over (each message is
+    /// written to be printed verbatim and exit 1).
     public enum ChartError: Error, CustomStringConvertible {
         case noInput
         case notJSON
         case rejected(String)          // ok:false document — carry its message
         case unsupported(String?)      // unknown or missing schema
 
+        /// The exact text `dit-chart` prints for this failure (its own
+        /// message, never a wrapper around the source document's).
         public var description: String {
             switch self {
             case .noInput: return "no JSON on stdin (usage: dit --json | dit-chart --ascii)"
@@ -80,6 +98,10 @@ public enum ChartRenderer {
     /// how charts start lying.
     public static let chartableSchemas: Set<String> = ["summary/1"]
 
+    /// Parse a `--json` document into charts. Throws ``ChartError/notJSON``
+    /// on malformed input, ``ChartError/rejected(_:)`` on `"ok":false`
+    /// (carrying the source's message), and ``ChartError/unsupported(_:)``
+    /// on unknown/missing schemas.
     public static func charts(fromJSON data: Data) throws -> (header: [String], charts: [Chart]) {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ChartError.notJSON
@@ -224,6 +246,7 @@ public enum ChartRenderer {
         return (NSDecimalNumber(decimal: value).rounding(accordingToBehavior: handler)).decimalValue
     }
 
+    /// Draw several charts one after another (each fully rendered).
     public static func render(charts: [Chart], width: Int, ascii: Bool) -> [String] {
         var lines: [String] = []
         for chart in charts {

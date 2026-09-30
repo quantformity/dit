@@ -7,8 +7,12 @@ struct PositionKey: Hashable {
 }
 
 public struct StockPosition: Hashable, Sendable {
+    /// Currency the shares trade and are valued in.
     public let currency: Currency
+    /// Normalized ticker symbol.
     public let symbol: String
+    /// Whole shares currently held (can be negative — see ``UntrackedShort``
+    /// for sales beyond the tracked long, which are reported separately).
     public let shares: Decimal
     /// Average total cost per share, **fees included**.
     public let averageCostPerShare: Decimal
@@ -16,6 +20,8 @@ public struct StockPosition: Hashable, Sendable {
     /// Total cost of the position (`shares × averageCostPerShare`).
     public var costBasis: Decimal { shares * averageCostPerShare }
 
+    /// Internal: built only by ``AccountBalances/compute(quotes:)`` and
+    /// the cross-account rollup in ``Portfolio/summary(displayCurrency:quotes:fx:)``.
     init(currency: Currency, symbol: String, shares: Decimal, averageCostPerShare: Decimal) {
         self.currency = currency
         self.symbol = symbol
@@ -30,11 +36,14 @@ public struct StockPosition: Hashable, Sendable {
 /// `nil`-valued liability. Listing it keeps the totals honest about
 /// being incomplete instead of quietly pretending the account is flat.
 public struct UntrackedShort: Hashable, Sendable {
+    /// Currency the short exposure sits in.
     public let currency: Currency
+    /// Normalized ticker symbol that was oversold.
     public let symbol: String
     /// Shares sold beyond the tracked long.
     public let shares: Decimal
 
+    /// Memberwise init (built by the replay and the summary rollup).
     public init(currency: Currency, symbol: String, shares: Decimal) {
         self.currency = currency
         self.symbol = symbol
@@ -73,27 +82,35 @@ public struct UntrackedShort: Hashable, Sendable {
 /// not hold; the cash moved, but the short liability is outside the
 /// model, so aggregate totals are knowingly incomplete there.
 public struct AccountBalances: Hashable, Sendable {
+    /// The account this snapshot belongs to (identity + reporting
+    /// currency; the balances themselves are all derived).
     public let account: Account
 
+    /// Exact per-currency cash after replay (zeros omitted).
     public var cashByCurrency: [Currency: Decimal]
     /// Remaining cash in the reporting currency; `nil` if a foreign
     /// currency component could not be converted.
     public var cash: Decimal?
 
+    /// Positions with nonzero tracked shares, sorted for stable display.
     public var positions: [StockPosition]
 
+    /// Live (unredeemed) GIC principal per currency.
     public var gicValueByCurrency: [Currency: Decimal]
     /// Live GIC principal in the reporting currency; `nil` if not convertible.
     public var gicValue: Decimal?
 
+    /// Booked gains/losses per currency (sales, redemptions, dividends).
     public var realizedPnLByCurrency: [Currency: Decimal]
     /// Booked P&L in the reporting currency; `nil` if not convertible.
     public var realizedPnL: Decimal?
 
+    /// Dividends received per currency (also counted inside realized P&L).
     public var dividendsByCurrency: [Currency: Decimal]
     /// Dividends in the reporting currency; `nil` if not convertible.
     public var dividends: Decimal?
 
+    /// Mark-to-market P&L per currency, only for quoted positions.
     public var unrealizedPnLByCurrency: [Currency: Decimal]
     /// `nil` when no position received a quote.
     public var unrealizedPnL: Decimal?
@@ -326,11 +343,17 @@ public typealias LastPrice = (Currency, String) -> Decimal?
 /// — derived baselines track an underlying proxy, so consumers can
 /// label the resulting change instead of presenting it as a real
 /// two-market-day comparison.
+/// Current close and its comparison baseline (both in one currency).
 public struct DayPricePair: Hashable, Sendable {
+    /// The as-of (or latest stored) close.
     public let current: Decimal
+    /// The earlier close `current` is compared against.
     public let previous: Decimal
+    /// true when `previous` is a derived/proxy baseline, not a real
+    /// earlier close of this same instrument.
     public let modelBaseline: Bool
 
+    /// Memberwise init; `modelBaseline` defaults to false (observed).
     public init(current: Decimal, previous: Decimal, modelBaseline: Bool = false) {
         self.current = current
         self.previous = previous

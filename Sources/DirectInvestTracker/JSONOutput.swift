@@ -23,6 +23,8 @@ import Foundation
 // - Native-currency figures and display-currency conversions are
 //   separate fields; `%` figures are native-currency ratios.
 
+/// The `--json` layer: envelope, snake_case keys, decimal-as-string
+/// numbers (see file header and docs/json.md for the full contract).
 public enum JSONOutput {
 
     // MARK: Envelope

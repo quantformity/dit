@@ -31,8 +31,13 @@ import Foundation
 /// determined; the CLI reports these as failures (exit 1), never as a
 /// silent partial answer.
 public struct DerivationError: Error, CustomStringConvertible {
+    /// The reason, phrased for the CLI (a refusal that does not
+    /// explain itself reads as a crash).
     public let message: String
+    /// Wraps a message; single-case style refusal type — the whole
+    /// backfill feature refuses with exactly this error.
     public init(_ message: String) { self.message = message }
+    /// Printed verbatim on exit 1 (no "Error: while…" wrapper).
     public var description: String { message }
 }
 
