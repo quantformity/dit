@@ -181,6 +181,14 @@ Listing filters: `--account A`, `--kind K` (`deposit`, `withdrawal`,
 `buy`, `sell`, `dividend`, `gic`, `gic-redeem`, `fx`), `--ticker SYM`,
 `--since D`, `--until D`, `--limit N`.
 
+**Statement view**: with NONE of those filters, `tx list` becomes a
+bank-statement table — `Debit` / `Credit` / `Balance after` columns,
+computed on the fly per account and currency (cash only; positions and
+GICs never enter a cash column; a trade's fee rides with it, an fx
+debits the source currency). With ANY filter you get the plain list,
+because running balances over a filtered subset would be theater.
+The `--kind`/`--ticker`-style lookups above are unaffected.
+
 `<id>` is the ID column of `dit tx list`; 8 hex chars are usually unique.
 
 ### Buy/sell without `--price`

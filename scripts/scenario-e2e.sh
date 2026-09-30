@@ -367,6 +367,24 @@ expect_fail_match "chart: --width needs a sane number" 2 "between 40 and 400" ch
 expect_fail_match "chart: empty stdin is an error, not an empty chart" 1 "no JSON on stdin" chartstdin
 
 echo
+echo "-- 18. Statement view (unfiltered tx list = bank style) --"
+# Without trade filters, 'tx list' derives Debit/Credit/Balance on the
+# fly; with ANY filter it must stay the plain list (running balances
+# over a subset would be theater).
+expect_ok_match "stmt: plain list gains Debit/Credit/Balance" "Balance after"  "$DIT" tx list
+expect_ok_match "stmt: the view explains what it is"          "derived on the fly" "$DIT" tx list
+expect_ok_match "stmt: account scope keeps its own balances"  "Balance after"  "$DIT" tx list --account TFSA
+if "$DIT" tx list --kind deposit | grep -q "Balance after"; then
+  FAIL=$((FAIL+1)); echo "FAIL — stmt: --kind must keep the plain list"
+else PASS=$((PASS+1)); echo "ok   — stmt: --kind keeps the plain list"; fi
+if "$DIT" tx list --limit 5 | grep -q "Balance after"; then
+  FAIL=$((FAIL+1)); echo "FAIL — stmt: --limit must keep the plain list"
+else PASS=$((PASS+1)); echo "ok   — stmt: --limit keeps the plain list"; fi
+# Per-account truth: Mercury (a USD account) must show its OWN USD
+# running balance, never a sum across accounts.
+expect_ok_match "stmt: USD account balance speaks USD" "USD" "$DIT" tx list --account "Mercury Bank"
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"

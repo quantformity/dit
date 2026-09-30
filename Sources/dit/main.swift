@@ -1800,6 +1800,48 @@ enum Main {
             txs = txs.filter { $0.date <= end }
         }
 
+        // Statement mode: with NO trade filter (no kind/ticker/since/
+        // until/limit), the list becomes a bank-statement view — Debit
+        // / Credit / running Balance per account + currency, derived
+        // live from the ledger. A filtered subset would make running
+        // balances theater, so any filter keeps the plain list.
+        let statementMode = options["kind"] == nil && options["ticker"] == nil
+            && options["since"] == nil && options["until"] == nil && options["limit"] == nil
+        if statementMode {
+            let rows: [StatementRow]
+            if let accountRef = options["account"] {
+                let account = try resolveAccount(accountRef, in: portfolio)
+                rows = LedgerStatement.rows(account: account,
+                                            transactions: portfolio.transactions(in: account.id))
+            } else {
+                rows = LedgerStatement.rows(portfolio: portfolio)
+            }
+            print("Transactions — \(scope) (\(rows.count) shown — statement view)")
+            guard !rows.isEmpty else { return }
+            let statementRows = rows.map { row -> [String] in
+                let tx = row.transaction
+                let accountName = portfolio.accounts.first { $0.id == tx.accountID }?.displayName ?? "\u{2014}"
+                let debit = row.debits.map { "-\(money($0.amount, $0.currency))" }
+                    .joined(separator: " ")
+                let credit = row.credits.map { money($0.amount, $0.currency) }
+                    .joined(separator: " ")
+                let balance = row.cashAfter.isEmpty ? "\u{2014}"
+                    : row.cashAfter.map { money($0.amount, $0.currency) }.joined(separator: " ")
+                return [String(tx.id.uuidString.prefix(8)), shortDate(tx.date), accountName,
+                        tx.summaryLine, debit, credit, balance]
+            }
+            for line in Table.render(headers: ["ID", "Date", "Account", "Detail", "Debit", "Credit", "Balance after"],
+                                     rows: statementRows, leftColumns: [0, 1, 2, 3]) {
+                print("  \(line)")
+            }
+            print()
+            print("  Debit/Credit/Balance are cash, derived on the fly \u{2014} nothing is")
+            print("  stored, and positions or GICs never appear in a cash column. Balance =")
+            print("  cash left in THAT account (per currency) after the event. Any filter")
+            print("  (--kind/--ticker/--since/--until/--limit) gives the plain list instead.")
+            return
+        }
+
         // Deterministic order: date, then storage order for equal dates.
         var indexed = txs.enumerated().sorted { lhs, rhs in
             if lhs.element.date != rhs.element.date { return lhs.element.date < rhs.element.date }
@@ -2671,6 +2713,13 @@ enum Main {
             USAGE: dit tx <command> [options]
 
               dit tx list [filters]               transactions (all accounts by default)
+
+              Unfiltered, 'tx list' prints a STATEMENT view: Debit /
+              Credit / running Balance columns per account and currency,
+              derived live from the ledger (cash only — positions and
+              GICs never appear in a cash column). Any filter (--kind,
+              --ticker, --since/--until, --limit) prints the plain list,
+              because running balances over a subset would lie.
               dit tx show <id>                    one transaction, in full
               dit tx deposit  --account A --amount N [options]
               dit tx withdraw --account A --amount N [options]
