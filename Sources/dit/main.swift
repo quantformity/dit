@@ -2576,6 +2576,9 @@ enum Main {
               Machine-readable output: 'dit --json …' prints one JSON
               document (also for errors) for summary, accounts, account
               show and quote — schemas and conventions in docs/json.md.
+              Pipe it to the chart tool: 'dit --json | dit-chart --ascii'
+              (see 'dit-chart --help' — it refuses documents it cannot
+              honestly chart).
 
               Group help: dit help <group> — e.g. 'dit help account'.
             """

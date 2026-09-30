@@ -54,6 +54,12 @@ Everything else refuses. `--json` takes no value (`--json=1` is a
 usage error). The flag is position-independent (before or after the
 command).
 
+**Machine consumers**: `dit-chart` (same package) pipes these documents
+into ASCII bar charts — `dit --json | dit-chart [--ascii]`. It only
+accepts schemas it understands (`summary/1` today), refuses others
+with exit 1, and renders `null` amounts as dashes, never zeros — the
+conventions in this file are exactly what it depends on.
+
 ## Global value conventions
 
 | Kind | Encoding | Example |

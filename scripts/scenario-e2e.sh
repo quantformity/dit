@@ -335,6 +335,38 @@ expect_fail_match "matrix: no known rate = error, not a table of dashes" 1 "no s
 expect_fail_match "matrix: json form keeps the error envelope"  1 '"ok":false'      mtx2 --json quote USD/CAD/HKD --offline
 
 echo
+echo "-- 17. Chart pipeline (dit --json | dit-chart) — renderer contracts --"
+# dit-chart reads ONE JSON document on stdin and draws or clearly
+# refuses. All offline; no network anywhere in this section.
+CHART="${CHART:-dit-chart}"
+chart() { "$DIT" --json --offline | "$CHART" "$@"; }
+chartf() { local f; f="$1"; shift; "$CHART" "$@" < "$f"; }
+chartstdin() { "$CHART" "$@" < /dev/null; }
+printf '%s' '{"ok":true,"schema":"summary/1","data":{"displayCurrency":"CAD","accounts":[{"name":"GOOD","reportingCurrency":"CAD","total":"1234.50"},{"name":"BAD","reportingCurrency":"CAD","total":"-456.70"},{"name":"GHOST","reportingCurrency":"CAD","total":null}],"holdings":[],"totals":{},"warnings":[]}}' > "$WORKDIR/mixed.json"
+expect_ok_match "chart: scenario summary renders the account chart" "Total value per account"  chart --ascii
+expect_ok_match "chart: holdings chart follows when values exist"   "Position value per holding" chart --ascii
+# The ASCII promise: the whole output stays in the plain tier (bytes
+# 128+ would tofu on cp936-style consoles — that is why the tier exists).
+if ! ascii_out="$(chart --ascii 2>&1)"; then
+  FAIL=$((FAIL+1)); echo "FAIL — chart: --ascii pipeline must succeed"
+elif printf '%s' "$ascii_out" | LC_ALL=C grep -q '[^ -~]'; then
+  FAIL=$((FAIL+1)); echo "FAIL — chart: --ascii leaked non-ASCII bytes"
+else
+  PASS=$((PASS+1)); echo "ok   — chart: --ascii stayed in the plain tier"
+fi
+expect_ok_match "chart: default tier draws the zero-line marker" "marks zero" chartf "$WORKDIR/mixed.json"
+expect_ok_match "chart: null total stays dashed, never 0.00" "GHOST.*\\?" chartf "$WORKDIR/mixed.json" --ascii
+printf '%s' '{"ok":true,"schema":"account/1","data":{}}' > "$WORKDIR/acc.json"
+expect_fail_match "chart: unknown schema refused, not guessed" 1 "no chart defined" chartf "$WORKDIR/acc.json"
+printf '%s' '{"ok":false,"error":"no FX rates available"}' > "$WORKDIR/err.json"
+expect_fail_match "chart: failed source doc carries its message" 1 "no FX rates available" chartf "$WORKDIR/err.json"
+printf '%s' 'tables not charts' > "$WORKDIR/garbage.txt"
+expect_fail_match "chart: non-JSON stdin is refused" 1 "not a JSON document" chartf "$WORKDIR/garbage.txt"
+expect_fail_match "chart: --svg is refused honestly" 2 "not implemented" chartf "$WORKDIR/mixed.json" --svg /tmp/x.svg
+expect_fail_match "chart: --width needs a sane number" 2 "between 40 and 400" chartstdin --width 20
+expect_fail_match "chart: empty stdin is an error, not an empty chart" 1 "no JSON on stdin" chartstdin
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"

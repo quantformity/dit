@@ -48,7 +48,9 @@ missing required field).
 
 Flags apply to the whole invocation; any order before or after the
 subcommand is fine. `--json` keeps exit codes unchanged (0 ok, 1
-runtime, 2 usage); parse `.ok` for the semantic result.
+runtime, 2 usage); parse `.ok` for the semantic result. Machine docs
+can be piped into `dit-chart` (see "Charts" below): the renderer
+only accepts schemas it understands.
 
 ## Summary
 
@@ -350,6 +352,40 @@ dit quote USD/CAD --as-of 2025-01-02 --offline
 dit quote TSLA TSLA.NE --from 2026-09-01 --to 2026-09-30
 dit quote USD/CAD/HKD/EUR                     # live matrix
 dit quote USD/CAD/HKD/EUR --as-of 2026-09-25  # one stored day
+```
+
+## Charts — `dit-chart` (the pipe renderer)
+
+`dit-chart` is a separate small tool in the same package: it reads
+**one JSON document on stdin** (from any `dit … --json`) and draws
+ASCII bar charts. Format flags decide the output; data decides the
+chart type.
+
+```
+dit --json | dit-chart                    # summary → charts (Unicode blocks)
+dit --json | dit-chart --ascii            # plain tier (# ^ ?), pure 7-bit
+dit --json | dit-chart --width 100        # drawing width (default: COLUMNS, 80)
+dit --json | dit-chart --svg out.svg      # REFUSED for now (exit 2, honest)
+```
+
+- **Chartable input**: `summary/1` today — account totals, position
+  values (% of combined), unrealized P&L, and day change as ± bar
+  charts with a zero line at one shared scale. Unknown schemas are
+  REFUSED (exit 1), never drawn as "generic bars"; a failed source
+  document (`"ok":false`) prints its message instead of a chart.
+- **Honesty carries through the pipe**: null amounts render dashed
+  (`—`/`?` marker), never as zero-length bars; derived (backfilled)
+  valuations keep their `*` marker and legend; `--offline` docs say
+  values are AT COST.
+- **Two glyph tiers** (for cross-platform outlook): the default uses
+  Unicode blocks `█✕▲`; `--ascii` guarantees bytes 128+ appear
+  nowhere (safe for LANG=C, cp936 consoles, and grep-able tests).
+- **Exit codes** match `dit`: 0 charted, 1 nothing chartable, 2 usage.
+
+```bash
+dit --json | dit-chart --ascii > pnl.txt     # save a text snapshot
+dit --json | dit-chart --width 120           # big terminal
+grep -c '#' <(dit --json | dit-chart --ascii)  # quick machine check
 ```
 
 ## Market data — the quote store
