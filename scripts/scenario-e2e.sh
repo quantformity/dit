@@ -527,8 +527,88 @@ expect_ok_match "ts: json without market data refuses to sum" '"reconciles":fals
 expect_ok_match "ts: json reports forced daily"  '"granularity":"daily"' pnl --json pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
 
 echo
+echo "-- 21. market coverage — facts about data the reports would need --"
+# The coverage fixture carries ONE deliberate instance of every fact
+# class: FAST dense (ok), GAPPY a 14-day inside hole (GAPS), STALEP a
+# series that stopped Jun 30 (STALE), NOPE nothing fetched at all
+# (NO DATA), HKD triangulating through the USD hub (~derived, works),
+# JPY with no chain anywhere (NO CHAIN). Windows pin --to so
+# staleness math cannot depend on the day the script runs.
+CV="$WORKDIR/cov-store"
+mkdir -p "$CV/store" "$CV/market"
+cov() { env DIT_BACKEND=file DIT_STORE_URL="$CV/store" DIT_MARKET_URL="$CV/market" "$DIT" "$@"; }
+covrange() { # sym start end price — daily closes, end EXCLUSIVE
+  local d=$2
+  while [[ "$d" < "$3" ]]; do
+    printf "$1,%s,$4\n" "$d"
+    d=$(date -j -v+1d -f "%Y-%m-%d" "$d" +%Y-%m-%d)
+  done
+}
+expect_ok "cov: bootstrap CAD account"  cov account add --currency CAD --name "Cov CAD"
+expect_ok "cov: bootstrap USD account"  cov account add --currency USD --name "Cov USD"
+for t in FAST GAPPY STALEP NOPE; do
+  expect_ok "cov: ticker $t" cov ticker add "$t" --currency USD
+done
+expect_ok "cov: USD deposit"            cov tx deposit --account "Cov USD" --amount 5000 --date 2026-06-01
+expect_ok "cov: buy FAST"               cov tx buy --account "Cov USD" --ticker FAST --shares 5 --price 10 --date 2026-06-10
+expect_ok "cov: buy GAPPY"              cov tx buy --account "Cov USD" --ticker GAPPY --shares 5 --price 10 --date 2026-06-10
+expect_ok "cov: buy STALEP"             cov tx buy --account "Cov USD" --ticker STALEP --shares 5 --price 10 --date 2026-06-10
+expect_ok "cov: buy NOPE (USD in CAD account)" cov tx buy --account "Cov CAD" --ticker NOPE --shares 5 --price 10 --currency USD --date 2026-06-10
+expect_ok "cov: buy BANK (CAD in CAD account)" cov tx buy --account "Cov CAD" --ticker BANK --shares 2 --price 30 --date 2026-06-12
+expect_ok "cov: HKD cash"               cov tx deposit --account "Cov USD" --amount 100 --currency HKD --date 2026-06-15
+expect_ok "cov: JPY cash"               cov tx deposit --account "Cov USD" --amount 100 --currency JPY --date 2026-06-15
+{ covrange FAST 2026-06-10 2026-09-30 11
+  covrange GAPPY 2026-06-10 2026-07-19 11
+  covrange GAPPY 2026-08-02 2026-09-30 11
+  covrange STALEP 2026-06-10 2026-07-01 11
+  covrange HKD/USD 2026-06-01 2026-11-02 0.128
+  covrange USD/CAD 2026-06-01 2026-11-02 1.40
+} > "$WORKDIR/cov-series.csv"
+expect_ok_match "cov: seed the series mix" "USD/CAD" cov market import "$WORKDIR/cov-series.csv"
+# Default run = a REPORT (exit 0 even with findings; --strict opts
+# into audit-style exit 1).
+expect_ok_match "cov: dense series reads ok"                "FAST.*ok — 112 closes" cov market coverage --to 2026-10-01
+expect_ok_match "cov: inside hole is a named GAPS row"      "GAPPY.*GAPS — longest hole 14d \(2026-07-19…2026-08-01\), 98 closes" cov market coverage --to 2026-10-01
+expect_ok_match "cov: dead series is STALE, not silent ok"  "STALEP.*STALE — last close 2026-06-30 \(93d before audit\)" cov market coverage --to 2026-10-01
+expect_ok_match "cov: nothing fetched says NO DATA"         "NOPE.*NO DATA — no daily series" cov market coverage --to 2026-10-01
+expect_ok_match "cov: triangulated FX chain is labelled"    "HKD→CAD.*~derived via USD \(HKD→USD→CAD\).*usable at all 5 period ends" cov market coverage --to 2026-10-01
+expect_ok_match "cov: no FX path is a declared NO CHAIN"    "JPY→CAD.*NO CHAIN"    cov market coverage --to 2026-10-01
+expect_ok_match "cov: dense FX passes every period end"     "USD→CAD.*usable at all 5 period ends" cov market coverage --to 2026-10-01
+expect_ok_match "cov: legends explain only what is shown"   "weekend/holiday dust"  cov market coverage --to 2026-10-01
+expect_fail_match "cov: --strict turns findings into exit 1" 1 "coverage gaps listed" cov market coverage --strict --to 2026-10-01
+# Windows and scope: moving --from past the hole must un-scream about
+# it (data before a gap window is nobody's gap — the VRT lesson).
+expect_ok_match "cov: --from shifts the gap window"         "GAPPY.*ok — 59 closes" cov market coverage --from 2026-08-01 --to 2026-10-01
+expect_ok_match "cov: audit before any trade is empty"      "nothing to cover"      cov market coverage --to 2026-03-01
+expect_ok_match "cov: --tickers matching nothing is honest" "nothing held at the audit date matches" cov market coverage --tickers ZZZ --to 2026-10-01
+expect_ok_match "cov: --tickers filter narrows the table"   "GAPPY"                 cov market coverage --tickers GAPPY --to 2026-10-01
+expect_ok_match "cov: --account scopes the audit"           "scope: Cov CAD"        cov market coverage --account "Cov CAD" --to 2026-10-01
+# Reporting currency changes the CHAINS needed, not the data.
+expect_ok_match "cov: --reporting-ccy USD audits other direction" "FX into USD" cov market coverage --reporting-ccy USD --to 2026-10-01
+expect_ok_match "cov: …via the inverted twin, marked"          "CAD→USD.*~inverted USD/CAD"  cov market coverage --reporting-ccy USD --to 2026-10-01
+expect_ok_match "cov: JPY has no path into USD either"            "NO CHAIN — no stored path JPY→USD"      cov market coverage --reporting-ccy USD --to 2026-10-01
+# Offline is the natural state: coverage READS, never fetches.
+expect_ok_match "cov: --offline works (no network needed)"  "Market coverage"       cov --offline market coverage --to 2026-10-01
+# --json: the same facts machine-readable. --strict keeps ONE
+# document on stdout (the "complete" flag carries the finding).
+json_ok "cov: json document parses"                          cov --json market coverage --to 2026-10-01
+expect_ok_match "cov: json schema + per-row statuses"       '"symbol":"GAPPY".*"schema":"coverage/1"' cov --json market coverage --to 2026-10-01
+expect_ok_match "cov: json gap run is exact"                 '"longestGap":\{"days":14,"from":"2026-07-19","to":"2026-08-01"\}' cov --json market coverage --to 2026-10-01
+expect_ok_match "cov: json marks the dead JPY chain"         '"from":"JPY","to":"CAD","usableNow":false' cov --json market coverage --to 2026-10-01
+expect_ok_match "cov: json triangulated chain flag"          '"approx":true.*"chain":"derived via USD' cov --json market coverage --to 2026-10-01
+expect_ok "cov: json+strict = one doc + exit 1" bash -c "DIT_BACKEND=file DIT_STORE_URL='$CV/store' DIT_MARKET_URL='$CV/market' '$DIT' --json market coverage --strict --to 2026-10-01 > /tmp/dit-cov.json; code=\$?; [ \$code -eq 1 ] && python3 -c \"import json;json.load(open('/tmp/dit-cov.json'))\" && [ \$(wc -l < /tmp/dit-cov.json) -eq 1 ]"
+expect_fail_match "cov: chart refuses coverage/1" 1 "no chart defined" bash -c "'$DIT' --json --store '$CV/store' --market-store '$CV/market' market coverage | '$CHART'"
+# Usage errors stay exit 2; unknown accounts stay exit 1; a missing
+# store is a quiet fact, not an error.
+expect_fail_match "cov: reversed window refused" 2 "before"  cov market coverage --from 2026-09-01 --to 2026-08-01
+expect_fail_match "cov: unknown account errors, not 'all'" 1 "no account matches" cov market coverage --account NOPE
+expect_fail_match "cov: unknown flag is a usage error" 2 "unknown option" cov market coverage --wat
+expect_ok_match "cov: empty store says nothing to check"  "Nothing to check" bash -c "DIT_BACKEND=file DIT_STORE_URL='$WORKDIR/cov-none' DIT_MARKET_URL='$WORKDIR/cov-none-m' '$DIT' market coverage"
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"
 rm -f /tmp/dit-scenario-out.txt
 [ "$FAIL" -eq 0 ]
+

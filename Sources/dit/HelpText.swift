@@ -38,8 +38,8 @@ func helpText(for invocation: Invocation) -> String {
 
           Machine-readable output: 'dit --json …' prints one JSON
           document (also for errors) for summary, accounts, account
-          show, quote and pnl — schemas and conventions in
-          docs/json.md.
+          show, quote, pnl and market coverage — schemas and
+          conventions in docs/json.md.
           Pipe it to the chart tool: 'dit --json | dit-chart --ascii'
           (see 'dit-chart --help' — it refuses documents it cannot
           honestly chart).
@@ -271,6 +271,24 @@ func helpText(for invocation: Invocation) -> String {
                                          tables; --symbol restricts
                                          BOTH the Latest and History
                                          tables to one ticker)
+          dit market coverage [options]  AUDIT (offline, read-only):
+                                         which held positions have
+                                         usable price history, and
+                                         where FX chains are missing
+                                         or too stale to convert —
+                                         find the holes BEFORE 'dit
+                                         pnl' dashes on them
+
+          coverage options: --from/--to DATE (audit window; default:
+          the whole ledger up to today; --to is ALSO the day
+          staleness is measured against), --account A (scope),
+          --tickers T (price-table display filter), --strict (exit 1
+          when any row has a gap — default exits 0: findings print,
+          they do not error). Reports FACTS only: points, dates,
+          staleness, gap runs ≥ 10 days (shorter holes are weekend
+          dust in weekday-sampled data). A series in the wrong
+          currency is named as never-usable; stale FX breaks
+          conversion by rule, so it is a finding.
 
           backfill options: --from SOURCE, --ratio R (skip
           calibration), --dry-run. The ratio is averaged over the

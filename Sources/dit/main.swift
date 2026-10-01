@@ -28,6 +28,12 @@ enum Main {
     /// Entry point: parse → dispatch → map failures to exit codes
     /// (0 success · 1 runtime error · 2 usage error).
     static func main() async {
+        // Keep stdout LINE-buffered even when piped/redirected. Without
+        // this, block-buffered stdout and unbuffered stderr interleave
+        // mid-line in merged captures (2>&1), so a trailing "error:" can
+        // land INSIDE a table row — corrupting lines for grep and for
+        // anything parsing the stream. Streaming hygiene, not cosmetics.
+        setvbuf(stdout, nil, _IOLBF, 0)
         let argv = Array(CommandLine.arguments.dropFirst())
         var invocation = Invocation()
         var global = Global()
@@ -179,7 +185,8 @@ enum Main {
         if global.json {
             switch (invocation.group, invocation.sub) {
             case ("", _), ("summary", _), ("accounts", _), ("account", nil),
-                 ("account", "list"), ("account", "show"), ("quote", _), ("pnl", _):
+                 ("account", "list"), ("account", "show"), ("quote", _), ("pnl", _),
+                 ("market", "coverage"):
                 break
             default:
                 let command = ([invocation.group, invocation.sub].compactMap { $0 }
@@ -188,7 +195,7 @@ enum Main {
                     : ([invocation.group, invocation.sub].compactMap { $0 }
                         .filter { !$0.isEmpty }.joined(separator: " "))
                 throw ParseError("--json is not supported for '\(command)' — "
-                    + "documented schemas: summary, accounts, account show, quote, pnl (see docs/json.md)")
+                    + "documented schemas: summary, accounts, account show, quote, pnl, market coverage (see docs/json.md)")
             }
         }
         switch (invocation.group, invocation.sub) {
@@ -250,10 +257,12 @@ enum Main {
             try await marketBackfill(invocation.rest, global: global)
         case ("market", "show"):
             try await marketShow(invocation.rest, global: global)
+        case ("market", "coverage"):
+            try await marketCoverage(invocation.rest, global: global)
         case ("market", "import"):
             try await marketImport(invocation.rest, global: global)
         case ("market", let sub?):
-            throw ParseError("unknown market subcommand '\(sub)' — use latest, history, backfill, import, or show (see 'dit help market')")
+            throw ParseError("unknown market subcommand '\(sub)' — use latest, history, backfill, import, coverage, or show (see 'dit help market')")
         case ("help", let topic):
             print(helpText(for: Invocation(group: topic ?? "usage", sub: nil, rest: [])))
         default:

@@ -50,6 +50,7 @@ no tables — even on errors.
 | `dit --json quote SYM… [--as-of DATE \| --from DATE --to DATE]` | `quote/1` (live / store / series) |
 | `dit --json quote CCY/CCY/CCY[/…] [--as-of DATE]` | `quote/1` (`"mode":"matrix"`) |
 | `dit --json pnl [window/filter options]` | `pnl/1` |
+| `dit --json market coverage [window/filter options]` | `coverage/1` |
 
 Everything else refuses. `--json` takes no value (`--json=1` is a
 usage error). The flag is position-independent (before or after the
@@ -433,6 +434,64 @@ With `--time-series`, `data` additionally carries `"series"`:
   computable (no price pair) — a data gap, distinct from
   `collapsedEmpty` (a measured zero). Both are reported, never
   hidden.
+
+## `coverage/1` — `dit --json market coverage [options]`
+
+The market-data audit (see cli.md “Coverage”). Facts, never
+valuations — there are no amounts in this document at all.
+
+```json
+{"data":
+ {
+  "auditDate": "2026-10-01",
+  "complete": false,
+  "fx": [
+   {"approx": true, "boundariesMissing": 0, "boundariesTotal": 5,
+    "chain": "derived via USD (HKD→USD→CAD)", "from": "HKD",
+    "lastClose": "2026-10-01", "staleDays": 0, "to": "CAD",
+    "usableNow": true},
+   {"boundariesMissing": 5, "boundariesTotal": 5, "chain": "none",
+    "from": "JPY", "to": "CAD", "usableNow": false}
+  ],
+  "notes": [],
+  "prices": [
+   {"accounts": ["Cov USD"], "currency": "USD", "derived": false,
+    "lastClose": "2026-09-29", "points": 112, "staleDays": 2,
+    "status": "ok", "symbol": "FAST"},
+   {"accounts": ["Cov USD"], "currency": "USD", "derived": false,
+    "lastClose": "2026-09-29",
+    "longestGap": {"days": 14, "from": "2026-07-19", "to": "2026-08-01"},
+    "points": 98, "staleDays": 2, "status": "gaps", "symbol": "GAPPY"}
+  ],
+  "reporting": "CAD",
+  "scope": "all accounts",
+  "seriesSlicing": "monthly",
+  "window": {"from": "2026-06-01", "to": "2026-10-01"}
+ },
+ "ok": true,
+ "schema": "coverage/1"}
+```
+
+- `prices` is one entry per (held symbol, recorded currency) at the
+  audit date; `accounts` names the holders. `status` is the FIRST
+  failing fact: `no-data` (no series, or no close at/before the audit
+  date), `wrong-currency` (series exists but can never be read for
+  that position), `stale` (usable but last close > 7 days early),
+  `gaps` (holes ≥ 10 days), else `ok`. Shorter missing runs are
+  weekend/holiday dust and stay unlisted — by design.
+- `fx` is one entry per foreign currency the scope uses. `chain`
+  names how the rate would compose today (`… direct`, `inverted …`,
+  `derived via USD …`, or `"none"`); `usableNow` means the FX clock
+  WOULD answer at the audit date (a chain of too-old legs answers
+  nothing → `false` with a `chain` label — the refill remedy, not the
+  import one). `boundariesMissing/Total` counts the period ends
+  (granularity echoed in `seriesSlicing`) where NO rate would answer —
+  each one is a `--time-series` period whose converted column dashes.
+  `approx: true` marks a derived chain (same honesty tier as `via`).
+- `complete` is the machine verdict (everything covered); `--strict`
+  makes it flip the exit code (0 → 1) but never the document shape.
+- Keys sort alphabetically like every document; the two stream rules
+  above apply. `dit-chart` refuses `coverage/1` (no chart defined).
 
 ## Scripting notes
 

@@ -628,6 +628,305 @@ func marketShow(_ args: [String], global: Global) async throws {
     }
 }
 
+/// `market coverage`: audit what the market store KNOWS for what the
+/// ledger HOLDS (positions open at the audit date + the FX chains a
+/// single-currency report would need). Purely offline and read-only:
+/// it never fetches, never writes, and never mixes currencies — the
+/// point is to find the holes BEFORE a P&L report dashes on them.
+func marketCoverage(_ args: [String], global: Global) async throws {
+    let options = try Options(args, valueOptions: ["from", "to", "account", "tickers", "reporting-ccy"],
+                              flagOptions: ["strict"])
+    guard options.positionals.isEmpty else {
+        throw ParseError("unexpected argument '\(options.positionals[0])' — "
+            + "'dit market coverage' filters with --account/--tickers/--from/--to (see 'dit help market')")
+    }
+    let fromRaw = options["from"]
+    let toRaw = options["to"]
+    let from = try fromRaw.map { try parseDate($0) }
+    let to = try toRaw.map { try parseDate($0) }
+    if let from, let to, to < from {
+        throw ParseError("--to '\(toRaw!)' is before --from '\(fromRaw!)'")
+    }
+
+    let (store, storeConfig) = try openStore(global: global)
+    guard let portfolio = try await store.load() else {
+        if global.json {
+            print(JSONOutput.envelope(schema: "coverage/1", data: [
+                "empty": true,
+                "note": "no portfolio found — add accounts and transactions first",
+                "store": storeConfig.url.path,
+            ]))
+            return
+        }
+        print("No portfolio found (store: \(storeConfig.backend.rawValue) at \(storeConfig.url.path)).")
+        print("Nothing to check — add accounts and transactions first.")
+        return
+    }
+
+    // MARK: Scope — accounts (default: every account, aggregated) and
+    // a ticker DISPLAY filter for the price table (FX stays scope-wide:
+    // a conversion is not tied to one ticker).
+    var accounts = portfolio.accounts
+    if let raw = options["account"] {
+        let names = splitCSV(raw)
+        guard !names.isEmpty else {
+            throw ParseError("--account needs at least one account name (see 'dit accounts')")
+        }
+        var resolved: [Account] = []
+        for name in names {
+            resolved.append(try resolveAccount(name, in: portfolio))
+        }
+        var seen = Set<UUID>()
+        accounts = resolved.filter { seen.insert($0.id).inserted }
+    }
+    var symbolFilter: Set<String>?
+    if let raw = options["tickers"] {
+        let list = splitCSV(raw).map { $0.uppercased() }
+        guard !list.isEmpty else { throw ParseError("--tickers needs at least one symbol") }
+        symbolFilter = Set(list)
+    }
+
+    // MARK: Market store — read-only, never fetched. An unreadable
+    // store is a NOTE, not a crash: every row then honestly reports
+    // the absence (dashes are answers too).
+    var marketData: MarketData?
+    var marketPath = "no market store"
+    var notes: [String] = []
+    do {
+        let (marketStore, configuration) = try openMarketStore(global: global)
+        marketPath = "\(configuration.backend.rawValue) at \(configuration.url.path)"
+        marketData = try await marketStore.load()
+    } catch {
+        notes.append("market store unreadable (\(error)) — every row below reports NO DATA")
+    }
+
+    // Default audit date: today; default gap window: the whole ledger
+    // history up to it (a hole anywhere in the span someone reports
+    // over matters — --from/--to narrow both).
+    let reporting = try options["reporting-ccy"].map { try parseCurrency($0, option: "--reporting-ccy") }
+        ?? global.display
+    let report = MarketCoverage.report(portfolio: portfolio,
+                                       accounts: accounts,
+                                       asOf: to ?? Date.now,
+                                       windowStart: from,
+                                       reportingCurrency: reporting,
+                                       market: marketData)
+    var shownSymbols = report.symbols
+    var filterNote: String?
+    if let filter = symbolFilter {
+        shownSymbols = report.symbols.filter { filter.contains($0.symbol) }
+        let unmatched = filter.subtracting(shownSymbols.map(\.symbol))
+        if !unmatched.isEmpty {
+            filterNote = "nothing held at the audit date matches --tickers "
+                + "\(unmatched.sorted().joined(separator: ", ")) (filters narrow, they never guess)"
+        }
+    }
+    let visible = CoverageReport(asOf: report.asOf, windowStart: report.windowStart,
+                                 seriesGranularity: report.seriesGranularity,
+                                 symbols: shownSymbols, fx: report.fx)
+
+    if global.json {
+        var data: [String: Any] = [
+            "auditDate": JSONOutput.isoDay(visible.asOf),
+            "complete": visible.complete,
+            "fx": visible.fx.map { chain -> [String: Any] in
+                var row: [String: Any] = [
+                    "chain": chain.chainLabel ?? "none",
+                    "from": chain.from.rawValue,
+                    "to": chain.to.rawValue,
+                    "usableNow": chain.usableNow,
+                ]
+                row["boundariesMissing"] = chain.boundariesMissing
+                row["boundariesTotal"] = chain.boundariesTotal
+                if let last = chain.lastAsOf {
+                    row["lastClose"] = JSONOutput.isoDay(last)
+                    row["staleDays"] = chain.staleDays ?? 0
+                }
+                if chain.chainLabel?.hasPrefix("derived") == true { row["approx"] = true }
+                return row
+            },
+            "notes": notes,
+            "prices": shownSymbols.map { row -> [String: Any] in
+                var entry: [String: Any] = [
+                    "accounts": row.accounts,
+                    "currency": row.currency.rawValue,
+                    "status": coverageStatus(row),
+                    "symbol": row.symbol,
+                ]
+                entry["derived"] = row.derived
+                entry["points"] = row.pointsInWindow
+                if let last = row.lastClose {
+                    entry["lastClose"] = JSONOutput.isoDay(last)
+                    entry["staleDays"] = row.staleDays ?? 0
+                }
+                if let gap = row.longestGap {
+                    entry["longestGap"] = [
+                        "days": gap.days,
+                        "from": JSONOutput.isoDay(gap.from),
+                        "to": JSONOutput.isoDay(gap.to),
+                    ]
+                }
+                return entry
+            },
+            "reporting": reporting.rawValue,
+            "scope": accounts.count == portfolio.accounts.count && accounts.count > 1
+                ? "all accounts" : accounts.map(\.displayName),
+            "seriesSlicing": visible.seriesGranularity.label,
+            "window": [
+                "from": JSONOutput.isoDay(visible.windowStart),
+                "to": JSONOutput.isoDay(visible.asOf),
+            ],
+        ]
+        if visible.isEmpty { data["empty"] = true }
+        if let filterNote { data["filterNote"] = filterNote }
+        print(JSONOutput.envelope(schema: "coverage/1", data: data))
+        if options.has("strict"), !visible.complete {
+            // ONE document on stdout — strict flips only the exit
+            // code; "complete":false already carries the finding.
+            fflush(stdout)
+            exit(1)
+        }
+        return
+    }
+
+    print("Market coverage — \(marketPath)")
+    print("  audit date \(shortDate(visible.asOf)) · window "
+        + "\(shortDate(visible.windowStart)) … \(shortDate(visible.asOf)) · "
+        + "reporting into \(reporting.rawValue)")
+    if accounts.count == portfolio.accounts.count {
+        print("  scope: all \(accounts.count) account(s)")
+    } else {
+        print("  scope: \(accounts.map(\.displayName).joined(separator: ", "))")
+    }
+    for note in notes { print("  note: \(note)") }
+    if let filterNote { print("  \(filterNote)") }
+
+    if visible.isEmpty {
+        print("\n  Nothing held at the audit date (no open positions, no foreign cash) — "
+            + "nothing to cover.")
+        return
+    }
+
+    if !shownSymbols.isEmpty {
+        print("\nPrices (per held symbol and its recorded currency):")
+        let rows = shownSymbols.map { row -> [String] in
+            [row.symbol, row.currency.rawValue, row.accounts.joined(separator: ", "),
+             coverageCell(row)]
+        }
+        for line in Table.render(headers: ["Symbol", "Ccy", "Accounts", "Coverage"],
+                                 rows: rows, leftColumns: [0, 1, 2, 3]) {
+            print("  \(line)")
+        }
+    }
+
+    if !visible.fx.isEmpty {
+        print("\nFX into \(reporting.rawValue) (what combining foreign totals needs):")
+        let rows = visible.fx.map { chain -> [String] in
+            ["\(chain.from.rawValue)→\(chain.to.rawValue)", coverageCell(chain)]
+        }
+        for line in Table.render(headers: ["Chain", "Coverage"], rows: rows, leftColumns: [0, 1]) {
+            print("  \(line)")
+        }
+    }
+
+    // Legends only say what the current table actually shows.
+    var legend: [String] = []
+    if shownSymbols.contains(where: { $0.derived }) || visible.fx.contains(where: { $0.chainLabel?.hasPrefix("derived") == true }) {
+        legend.append("* derived price proxy · ~ derived FX chain (inverted/cross) — labelled approximations, NOT missing data")
+    }
+    if shownSymbols.contains(where: { $0.longestGap != nil }) {
+        legend.append("GAPS = holes of ≥ 10 missing days; shorter runs are weekend/holiday dust (weekday-sampled data) and stay unlisted")
+    }
+    if shownSymbols.contains(where: { ($0.staleDays ?? 0) > 7 }) || visible.fx.contains(where: { !$0.usableNow && $0.chainLabel != nil }) {
+        legend.append("STALE = last data older than 7 days — FX conversion REFUSES it (dashes); stale prices are still used, labelled")
+    }
+    if shownSymbols.contains(where: { !$0.measurable }) || visible.fx.contains(where: { $0.chainLabel == nil }) {
+        legend.append("NO DATA / WRONG CCY / NO CHAIN → 'dit market history' fetches what is missing, 'dit market import FILE' seeds measured data")
+    }
+    if !legend.isEmpty { print(); for line in legend { print("  \(line)") } }
+
+    if options.has("strict"), !visible.complete {
+        throw LookupError("coverage gaps listed above — 'dit market history' fetches, 'dit market import' seeds")
+    }
+}
+
+/// Machine-stable status word for one price row (keys sort, statuses
+/// do not lie): the FIRST failing fact wins, the rest print as data.
+func coverageStatus(_ row: SymbolCoverage) -> String {
+    if !row.seriesFound { return "no-data" }
+    if !row.usableSource { return "wrong-currency" }
+    if row.lastClose == nil { return "no-data" }
+    if (row.staleDays ?? 0) > 7 { return "stale" }
+    if row.longestGap != nil { return "gaps" }
+    return "ok"
+}
+
+/// One-line price coverage text: status word first (greppable), then
+/// the raw facts — points, dates, staleness, the longest hole.
+func coverageCell(_ row: SymbolCoverage) -> String {
+    var parts: [String] = []
+    switch coverageStatus(row) {
+    case "no-data":
+        if !row.seriesFound {
+            parts.append("NO DATA — no daily series for \(row.symbol) — P&L dashes, summary values at cost")
+        } else if let span = row.seriesRange {
+            parts.append("NO USABLE CLOSES in window — series runs \(shortDate(span.first))…\(shortDate(span.last))")
+        } else {
+            parts.append("NO DATA before the audit date")
+        }
+    case "wrong-currency":
+        parts.append("WRONG CCY — series is \(row.seriesCurrency?.rawValue ?? "?") and a "
+            + "\(row.currency.rawValue) position needs \(row.currency.rawValue) — NEVER USED")
+    case "stale":
+        parts.append("STALE — last close \(shortDate(row.lastClose!)) (\(row.staleDays!)d before audit)")
+        if let gap = row.longestGap {
+            // STALE first, but the inside hole is a SEPARATE fact —
+            // audit wants both, and the status word must not swallow
+            // data.
+            parts.append("+ GAPS \(gap.days)d (\(shortDate(gap.from))…\(shortDate(gap.to)))")
+        }
+        parts.append("\(row.pointsInWindow) closes in window")
+    case "gaps":
+        parts.append("GAPS — longest hole \(row.longestGap!.days)d (\(shortDate(row.longestGap!.from))…\(shortDate(row.longestGap!.to)))")
+        parts.append("\(row.pointsInWindow) closes in window")
+    default:
+        parts.append("ok — \(row.pointsInWindow) closes")
+    }
+    if let range = row.windowRange, coverageStatus(row) == "ok" {
+        parts.append("\(shortDate(range.first))…\(shortDate(range.last))")
+    }
+    if row.derived { parts.append("*derived") }
+    return parts.joined(separator: ", ")
+}
+
+/// One-line FX coverage text: chain provenance + the boundary facts.
+func coverageCell(_ chain: FXChainCoverage) -> String {
+    guard let label = chain.chainLabel else {
+        return "NO CHAIN — no stored path \(chain.from.rawValue)→\(chain.to.rawValue); "
+            + "import a \(chain.from.rawValue)/\(chain.to.rawValue) series or both USD legs (separate totals)"
+    }
+    // Derived chains (inverted twin / triangulated cross) wear the
+    // marker wherever they print — same `~` the P&L header uses.
+    let derived = label.hasPrefix("derived") || label.hasPrefix("inverted")
+    if !chain.usableNow {
+        var text = (derived ? "~" : "") + label + " STALE — chain last answered "
+            + "\(shortDate(chain.lastAsOf!)) (\(chain.staleDays!)d before audit); conversions dash"
+        if chain.boundariesMissing > 0 {
+            text += " — missing at \(chain.boundariesMissing)/\(chain.boundariesTotal) period ends"
+        }
+        return text
+    }
+    var text = "ok — \(derived ? "~" : "")\(label), last close \(shortDate(chain.lastAsOf!)) (\(chain.staleDays!)d)"
+    if chain.boundariesMissing == 0, chain.boundariesTotal > 0 {
+        text += "; usable at all \(chain.boundariesTotal) period ends"
+    }
+    if chain.boundariesMissing > 0 {
+        text += " — but missing at \(chain.boundariesMissing)/\(chain.boundariesTotal) period ends "
+            + "(e.g. \(chain.missingExample.map(shortDate) ?? "?"))"
+    }
+    return text
+}
+
 /// Seed the market store from a CSV of REAL observations
 /// (`SYMBOL,YYYY-MM-DD,PRICE`). Imported observations always win
 /// over derived values on the same day — the import path is how

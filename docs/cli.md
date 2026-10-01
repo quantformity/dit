@@ -523,6 +523,8 @@ dit market backfill <target> --from <source> [--ratio R] [--dry-run]
                                        # DERIVE missing history from a proxy
 dit market import FILE [--dry-run]     # seed real closes from a CSV
 dit market show [--symbol S] [--days N]   # inspect what the market store holds
+dit market coverage [--from D --to D] [--account A] [--tickers T] [--reporting-ccy X] [--strict]
+                                       # AUDIT what the store knows for what you hold
 ```
 
 `market latest` prints one aligned price table (symbols + FX pairs,
@@ -592,12 +594,46 @@ ever touches the ledger.
   Imported observations are real: they replace derived guesses for the
   same day. Unparsable lines are reported, line-numbered.
 
-All market commands need the network (except `show` and `import`,
-which work offline); `--offline` refuses `latest` and `history`. The
+All market commands need the network (except `show`, `coverage` and
+`import`, which work offline); `--offline` refuses `latest` and
+`history`. The
 store is read by `dit quote --as-of` (it labels each price observed or
 backfilled); `dit summary` still values positions from live quotes —
 summary-level `--as-of` and offline valuation from this store are the
 designed follow-up.
+
+### Coverage — find the holes before `dit pnl` dashes on them
+
+`market show` answers "what does the store hold?". `market coverage`
+asks the harder question: "for what my ledger holds TODAY, what does
+the store KNOW?" It is a pure offline audit — no network, no writes,
+no valuations, no percentages (weekday-sampled series make day-fraction
+"coverage" a lie anyway). It reads the same sources the reports read
+and reports their failure modes by name:
+
+- **Prices**: one row per held symbol and its recorded currency — a
+  ticker held in both USD and CAD needs TWO series and gets two rows.
+  Facts per row: closes in window, their date range, staleness against
+  the audit day, the longest missing-day hole (reported only at ≥ 10
+  days — shorter runs are weekend/holiday dust), a `*derived` marker
+  for proxy series, and a `WRONG CCY` verdict for a series stored in
+  a currency that can never be read for that position.
+- **FX**: one row per foreign currency the scope uses (cash,
+  positions, GICs) — the CHAIN into the reporting currency and
+  whether it is fresh enough to convert, checked at the audit day AND
+  at every period end a `--time-series` report would slice at. A
+  chain of 8-month-old legs is `STALE` (the FX clock refuses it —
+  conversion dashes), not covered; a currency with no pair anywhere is
+  `NO CHAIN`.
+
+The audit window defaults to the whole ledger up to today (use
+`--from/--to` to narrow; `--to` is also the day staleness is measured
+against). Gaps are only counted FROM the day the ledger first needed
+the data — darkness before a first purchase is nobody's gap. Default
+exit is 0 (it is a report): `--strict` flips that to 1 when any row
+has a finding, for scripts. Filters behave everywhere: `--tickers`
+narrows the price table, `--account` scopes the whole audit, unknown
+flags and reversed windows are usage errors (exit 2).
 
 ```bash
 dit market latest
@@ -605,6 +641,8 @@ dit market history
 dit market history --all
 dit market show --symbol RBLX --days 10
 dit market import old-prices.csv
+dit market coverage                    # what would dash, and why
+dit market coverage --strict           # …and fail a script when it does
 ```
 
 ## A realistic walkthrough

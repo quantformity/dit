@@ -608,3 +608,58 @@ Tests: FXHistory suite (7), conversion test now pins staleness
 refusal, e2e §19/§20 reseeded with a dense flat USD/CAD history
 (default-window checks pinned to --to 2026-10-01 so script runs
 stay date-proof). 275/275 e2e; 171 swift-testing + 112 XCTest.
+
+
+## Entry 15 — `dit market coverage`: auditing data gaps before reports dash on them (Oct 1 2026)
+
+The single-currency P&L can now DASH whole periods (no usable FX at a
+boundary) and DASH position-change columns (no price pair). Coverage
+closes the loop: a read-only, offline audit answering "for what my
+ledger holds, what does the market store KNOW — and where would a
+report have to dash?" No second financial model: it reads the same
+sources the reports read (daily symbol series, FXClock chains) and
+prints facts only.
+
+Decisions worth keeping:
+
+- **Per-symbol data-need windows.** The first version scanned gaps
+  from the LEDGER start; on the real store it screamed "GAPS 482d"
+  for VRT, whose series starts exactly on the buy day — a fabricated
+  finding. Now each row checks from the first ledger event that
+  references it (buy/sell/dividend for prices, first event expressed
+  in the currency for FX). Darkness before anyone traded is nobody's
+  gap.
+- **Gaps ≥ 10 days only.** Weekday-sampled series always lack
+  weekends; holiday clusters run to 8-9 days. Shorter runs are
+  calendar dust — listing them would hide the real holes.
+- **Wrong-currency is a stated fact, never a green check.** A CAD
+  position whose only series is USD-cleared is never used by the
+  reporting views (FX honesty rules); coverage names it WRONG CCY
+  with the reason, so nobody mistakes "data exists" for "data used".
+- **FX coverage = CHAIN + FRESHNESS, per reporting boundary.** A
+  chain of 8-month-old legs exists but converts NOTHING (the FX
+  clock refuses it) — reported STALE, with the refill remedy, not
+  the import one. Convertibility is checked at every period-end the
+  `--time-series` slicing would use, so what gets reported is
+  exactly what a real report would dash on.
+- **Strict is opt-in.** Default exit is 0 (it is a report, like
+  `quote` range); `--strict` flips exit 1 when rows have findings,
+  and `--json --strict` keeps the single-document contract (the
+  finding lives in `"complete":false`; strict only flips the code).
+
+Also fixed on the way: `main()` now sets stdout LINE-buffered
+(`setvbuf(_IOLBF)`) — with block-buffered stdout and unbuffered
+stderr, merged captures (`2>&1`, the e2e harness) interleaved the
+two streams mid-line, corrupting grid rows; the §21 strict check
+caught it by refusing to match an error message that WAS being
+printed, just shredded. Streaming hygiene, same family as the
+render honesty rules.
+
+Files: `MarketCoverage.swift` (new lib audit: SymbolCoverage,
+FXChainCoverage, CoverageReport, `MarketCoverage.report`),
+`marketCoverage` + cell renderers in `CommandsMarket.swift`,
+dispatch + json-schema gate in `main.swift`, help text, 11 unit
+tests (MarketCoverageTests), e2e §21 (a fixture carrying one
+instance of every fact class — dense, inside-hole, dead series,
+missing series, triangulated chain, no-path chain). Counts: 182
+swift-testing + 112 XCTest, 324/324 e2e.
