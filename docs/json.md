@@ -58,8 +58,8 @@ command).
 
 **Machine consumers**: `dit-chart` (same package) pipes these documents
 into ASCII bar charts — `dit --json | dit-chart [--ascii]`. It only
-accepts schemas it understands (`summary/1` and `quote/1` series
-today; `pnl/1` and anything else are refused with exit 1), and
+accepts schemas it understands (`summary/1` only today; `quote/1`,
+`pnl/1` and anything else are refused with exit 1), and
 renders `null` amounts as dashes, never zeros — the
 conventions in this file are exactly what it depends on.
 

@@ -360,6 +360,8 @@ expect_ok_match "chart: default tier draws the zero-line marker" "marks zero" ch
 expect_ok_match "chart: null total stays dashed, never 0.00" "GHOST.*\\?" chartf "$WORKDIR/mixed.json" --ascii
 printf '%s' '{"ok":true,"schema":"account/1","data":{}}' > "$WORKDIR/acc.json"
 expect_fail_match "chart: unknown schema refused, not guessed" 1 "no chart defined" chartf "$WORKDIR/acc.json"
+printf '%s' '{"ok":true,"schema":"quote/1","data":{"mode":"series","symbols":[]}}' > "$WORKDIR/quote.json"
+expect_fail_match "chart: quote/1 refused (series chart undefined, not guessed)" 1 "no chart defined for schema 'quote/1'" chartf "$WORKDIR/quote.json"
 printf '%s' '{"ok":false,"error":"no FX rates available"}' > "$WORKDIR/err.json"
 expect_fail_match "chart: failed source doc carries its message" 1 "no FX rates available" chartf "$WORKDIR/err.json"
 printf '%s' 'tables not charts' > "$WORKDIR/garbage.txt"

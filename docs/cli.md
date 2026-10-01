@@ -497,8 +497,8 @@ dit --json | dit-chart --width 100        # drawing width (default: COLUMNS, 80)
 dit --json | dit-chart --svg out.svg      # REFUSED for now (exit 2, honest)
 ```
 
-- **Chartable input**: `summary/1` and `quote/1` series. Unknown
-  schemas — including `pnl/1` — are REFUSED (exit 1, "no chart
+- **Chartable input**: `summary/1` only. Everything else —
+  including `quote/1` and `pnl/1` — is REFUSED (exit 1, "no chart
   defined for …"), never drawn as "generic bars"; a failed source
   document (`"ok":false`) prints its message instead of a chart.
 - **Honesty carries through the pipe**: null amounts render dashed

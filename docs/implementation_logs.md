@@ -684,3 +684,30 @@ became a pure, injectable resolver + three cases (fresh → dit, legacy-only
 → legacy, both → dit); machine-state-dependent checks now derive their
 expectation from the same resolver, so they pass on machines with either
 layout. 182 swift-testing + 113 XCTest, 324/324 e2e.
+
+## Entry 17 — 2026-10-01 — what dit-chart actually is (docs matched to code)
+
+Audited the chart tool for the user and found documentation drift:
+cli.md/json.md/help said dit-chart charts "summary/1 and quote/1
+series". It never charted quote/1 — chartableSchemas has always been
+summary/1 only, and quote range documents are refused with "no chart
+defined". The claim described an intention, not the tool; fixed in
+docs and pinned with an e2e refusal check (quote/1 must keep being
+refused until an honest chart for time series exists — bars of
+closing prices dressed up as horizontal category bars would flatten a
+trend into a size comparison, which is exactly the lie the refuse-
+by-default rule exists to prevent). A series chart, if it ever comes,
+needs its own chart type (sparkline), not the category renderer.
+
+dit-chart in one breath: reads exactly ONE JSON doc from stdin,
+charts summary/1 only (four charts: totals per account, position
+values with %-of-total and the * derived-quote marker kept, unrealized
+P&L and day change as +/- bars around a shared-scale zero), two glyph
+tiers (Unicode default, --ascii plain), --width 40..400, refuses --svg
+(exit 2). Unknown schema / bad JSON / failed source document -> exit 1
+with a reason. No money math, no network, no re-derivation of
+anything.
+
+Counts: 326/326 e2e (a strict-failure check counts exit-code and
+pattern separately — that is why one added check moves the counter by
+two).
