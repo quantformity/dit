@@ -1,46 +1,46 @@
 import Foundation
 
-/// A Markdown pipe table: `| cell | cell |` lines with a `---`
-/// separator (right-aligned columns use `---:`). Cells are padded to
-/// the widest value so the table reads aligned in a raw terminal AND
-/// renders as a table in Markdown viewers — one renderer, both jobs.
-/// Pipes inside data are escaped (`\|`) so account names cannot tear
-/// a row apart. Deterministic (no locale-dependent measurement) so
-/// the same summary always renders the same way.
+/// A full-grid table in Unicode box-drawing style (the "tabulate"
+/// look): `│` column walls, a `├─┼─┤` rule between every pair of
+/// rows, and `┌ ┬ ┐ ├ ┼ ┤ └ ┴ ┘` frame joints. Cells are padded to
+/// the widest value, so the grid reads aligned straight off stdout.
+/// Vertical bars inside data become broken bars (`¦`) so a value can
+/// never tear a grid wall apart. Deterministic (no locale-dependent
+/// measurement) so the same summary always renders the same way.
 public enum Table {
-    /// Render a full table (header + separator rule included) with
+    /// Render a full table — top edge, header row, rule, every data
+    /// row with a rule after it (the last one closing as `└─┴─┘`) —
     /// columns aligned to the widest cell per column.
     public static func render(headers: [String], rows: [[String]], leftColumns: Set<Int> = [0]) -> [String] {
         let columns = headers.count
-        func escape(_ text: String) -> String {
-            text.replacingOccurrences(of: "|", with: "\\|")
+        func sanitize(_ text: String) -> String {
+            text.replacingOccurrences(of: "|", with: "¦")
+                .replacingOccurrences(of: "│", with: "¦")
         }
         let widths = (0..<columns).map { column in
-            ([headers[column]] + rows.map { $0[column] }).map { escape($0).count }.max() ?? 0
+            ([headers[column]] + rows.map { $0[column] }).map { sanitize($0).count }.max() ?? 0
         }
-        func format(_ cells: [String]) -> String {
+        func rowLine(_ cells: [String]) -> String {
             let body = (0..<columns).map { column -> String in
-                let cell = escape(cells[column])
+                let cell = sanitize(cells[column])
                 let pad = String(repeating: " ", count: widths[column] - cell.count)
                 return " " + (leftColumns.contains(column) ? cell + pad : pad + cell) + " "
             }
-            .joined(separator: "|")
-            return "|" + body + "|"
+            .joined(separator: "│")
+            return "│" + body + "│"
         }
-        var lines = [format(headers)]
-        // The separator carries the alignment: `---:` marks the columns
-        // that read right-aligned, so viewers and raw text agree on
-        // which figures are money and which are labels.
-        let separator = (0..<columns).map { column -> String in
-            let dashes = max(3, widths[column])
-            let rule = leftColumns.contains(column)
-                ? String(repeating: "-", count: dashes)
-                : String(repeating: "-", count: max(2, dashes - 1)) + ":"
-            return " " + rule + " "
+        func ruleLine(_ left: String, _ mid: String, _ right: String) -> String {
+            // +2: the rule spans each cell's padding too, so every
+            // ┬/┼/┴ joint lands exactly on a row wall.
+            let body = widths.map { String(repeating: "─", count: $0 + 2) }.joined(separator: mid)
+            return left + body + right
         }
-        .joined(separator: "|")
-        lines.append("|" + separator + "|")
-        for row in rows { lines.append(format(row)) }
+        var lines = [ruleLine("┌", "┬", "┐"), rowLine(headers)]
+        for row in rows {
+            lines.append(ruleLine("├", "┼", "┤"))
+            lines.append(rowLine(row))
+        }
+        lines.append(ruleLine("└", "┴", "┘"))
         return lines
     }
 }

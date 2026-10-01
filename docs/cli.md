@@ -39,14 +39,14 @@ missing required field).
 
 Tables (the `summary` breakdowns, `accounts`, `account show`, `ticker`
 listings, `tx list`, `quote`, and the `market` reports) print as
-**Markdown pipe tables**: a header row, a `---`/`---:` separator, and
-rows padded to the widest value. One rendering serves both readers —
-aligned columns when read raw in a terminal, a real table when the
-output is piped into or pasted into a Markdown viewer. Pipes inside
-data are escaped (`\|`) so no value can tear a row apart. `--json` is
-unaffected: the machine contract (docs/json.md) never embeds table
-syntax, and provenance travels in dedicated fields (`via`, `basis`),
-never in display markers.
+full-grid tables in Unicode box-drawing: a `│` wall between columns,
+a `├─┼─┤` rule between every pair of rows, and a `└─┴┘` bottom edge.
+Cells are padded to the widest value, so tables read aligned straight
+off stdout; labels are left-aligned, money stays right-aligned.
+Vertical bars inside data render as broken bars (`¦`) so a value can
+never tear a grid wall. `--json` is unaffected: the machine contract
+(docs/json.md) never embeds table syntax, and provenance travels in
+dedicated fields (`via`, `basis`), never in display markers.
 
 ## Global options
 

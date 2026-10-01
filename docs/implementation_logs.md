@@ -482,3 +482,17 @@ and the user decides.
   advertised INR/SGD (not in the Currency enum) and omitted AUD/NZD.
 - e2e: the `txid` helper scraped the first whitespace field of the
   old space tables; it now parses the first pipe cell. 190/190 after.
+
+## 2026-09-30 — tables settle on the full-grid style (supersedes the pipe experiment)
+- The same day's Markdown-pipe switch was superseded before release:
+  `Table.render` now emits the full Unicode grid — `│` column walls,
+  `├─┼─┤` between every pair of rows, `└─┴─┘` bottom edge — matching
+  the tabulate-style layout asked for. Rule segments span cell width
+  + padding so every ┼/┬/┴ joint lands exactly on a row wall.
+- Vertical bars in data render as broken bars (`¦`) so a value can
+  never tear a grid wall; alignment lives in the padding (labels
+  left, money right), not in a separator marker.
+- The two script parsers (e2e `txid`, `import-investments.sh` GIC
+  lookup) key off the grid's shape — a data row's ID is the 8-hex
+  field after the `│` wall — so they are format-proof against
+  further style changes. 190/190 + full unit suite green.
