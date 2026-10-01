@@ -608,6 +608,48 @@ expect_fail_match "cov: unknown flag is a usage error" 2 "unknown option" cov ma
 expect_ok_match "cov: empty store says nothing to check"  "Nothing to check" bash -c "DIT_BACKEND=file DIT_STORE_URL='$WORKDIR/cov-none' DIT_MARKET_URL='$WORKDIR/cov-none-m' '$DIT' market coverage"
 
 echo
+echo "-- 22. Interactive HTML charts (dit-chart --html) — the pipe grows a window --"
+# --html writes ONE self-contained file (no network, no CDN) and keeps
+# the refusal contract: unknown schemas and snapshot documents are
+# refused, honest legends survive, and ≥10-day holes stay visible as
+# line breaks. All offline; nothing here opens a browser.
+H="$WORKDIR/html"
+mkdir -p "$H"
+hcheck() { # hcheck NAME PATTERN FILE — file must contain pattern
+  if grep -Eq "$2" "$3" 2>/dev/null; then
+    PASS=$((PASS+1)); echo "ok   — $2 in $(basename "$3")"
+  else
+    FAIL=$((FAIL+1)); echo "FAIL — $2 expected in $3"; ls -la "$3" 2>/dev/null | sed 's/^/     | /'
+  fi
+}
+# The GAPPY+FAST series document (both USD-tickers, but the imported
+# series carry NO stated currency → they must NOT share an axis).
+expect_ok "html: quote series renders to a file" bash -c   "DIT_BACKEND=file DIT_STORE_URL='$CV/store' DIT_MARKET_URL='$CV/market' '$DIT' --json quote FAST GAPPY --from 2026-06-10 --to 2026-09-29 | '$CHART' --html '$H/series.html'"
+hcheck "html: self-contained page"          '<!doctype html>'               "$H/series.html"
+hcheck "html: unstated currencies stay split" "currency not stated, kept off other charts" "$H/series.html"
+hcheck "html: the 14-day hole draws as a break (null)" '"name":"GAPPY".*null|"label":"GAPPY[^"]*".*null' "$H/series.html"
+hcheck "html: the break legend ships with the chart" "line breaks mark"    "$H/series.html"
+hcheck "html: axis honesty note present"    "not zero"                      "$H/series.html"
+# Summary documents keep working in html (bar charts with the dashed
+# unknown rule), and '-' sends the page to stdout instead of a file.
+expect_ok "html: summary page renders" bash -c   "DIT_BACKEND=file DIT_STORE_URL='$CV/store' DIT_MARKET_URL='$CV/market' '$DIT' --json --offline summary | '$CHART' --html '$H/summary.html'"
+hcheck "html: summary keeps the dashed-unknown rule" "dashed" "$H/summary.html"
+expect_ok_match "html: '-' prints the page to stdout" '<!doctype html>' bash -c   "DIT_BACKEND=file DIT_STORE_URL='$CV/store' DIT_MARKET_URL='$CV/market' '$DIT' --json --offline summary | '$CHART' --html -"
+# Refusals carry over to the window: no guessing at schemas, no
+# charting single-day snapshots, and usage errors stay exit 2.
+expect_fail_match "html: unknown schema still refused" 1 "no chart defined" bash -c   "'$CHART' --html '$H/bad.html' < '$WORKDIR/acc.json'"
+test ! -e "$H/bad.html" && PASS=$((PASS+1)) && echo "ok   — refused docs write no file" || { FAIL=$((FAIL+1)); echo "FAIL — refused docs write no file"; }
+# A single-day snapshot (mode "store") has no time series → refused.
+printf '%s' '{"ok":true,"schema":"quote/1","data":{"mode":"store","count":1,"quotes":[{"basis":"observed","ccy":"USD","date":"2026-06-30","price":"10.00","symbol":"FAST","via":null}]}}' > "$H/snapdoc.json"
+expect_fail_match "html: snapshot quotes refused (no time series)" 1 "no chart defined" bash -c   "'$CHART' --html '$H/snap.html' < '$H/snapdoc.json'"
+# And a FAILED source document (offline live-quote refusal) never
+# renders — chart carries the source's message, exits 1, writes no page.
+expect_fail_match "html: failed source doc carries its message, no page" 1 "source reported failure" bash -c   "DIT_BACKEND=file DIT_STORE_URL='$CV/store' DIT_MARKET_URL='$CV/market' '$DIT' --json quote FAST --offline | '$CHART' --html '$H/snap2.html'"
+expect_fail_match "html: --html without a path is a usage error" 2 "needs an output file" "$CHART" --html
+expect_fail_match "html: --open needs --html (nothing to open)"  2 "needs --html"        "$CHART" --open
+expect_fail_match "html: empty stdin refused, not an empty page" 1 "no JSON on stdin" bash -c   "'$CHART' --html '$H/empty.html' < /dev/null"
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"

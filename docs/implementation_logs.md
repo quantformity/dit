@@ -711,3 +711,36 @@ anything.
 Counts: 326/326 e2e (a strict-failure check counts exit-code and
 pattern separately — that is why one added check moves the counter by
 two).
+
+## Entry 18 — 2026-10-01 — `dit-chart --html`: the pipe grows an interactive window
+
+Cross-platform ask: an interactive charting frontend that works on
+macOS/Windows/Linux. Decision: the browser IS the GUI. `--html PATH`
+makes dit-chart write ONE self-contained offline file (chart data +
+a ~2.7 KB drawing script embedded — no CDN, no network, works over
+file://, email it to yourself and it still opens). `--open` hands the
+page to the system viewer (open/xdg-open). `--html -` streams the
+page to stdout.
+
+What changed vs the "one renderer" rule, and what did NOT: the
+renderer still never re-implements finance. HTML mode gained a real
+LINE-CHART type for `quote/1` series (the schema ASCII honestly could
+not serve), with the honesty rules ported:
+- one chart per STATED currency — mixed or unstated units never share
+  an axis (two unknowns together would bet they are the same unit);
+- data holes ≥ 10 days break the stroke (same dust-vs-hole reasoning
+  as the coverage audit; a weekend is not a data hole);
+- backfilled series render dashed and labelled DERIVED;
+- tooltips show the document's exact strings — the drawing script
+  parses floats for GEOMETRY only, money is never recomputed;
+- unknown/chartless documents still produce NO file and exit 1.
+
+Tests: ChartHTMLTests (10) pin the above with crafted documents;
+e2e §22 (22 checks) runs the real pipeline on the coverage fixture —
+GAPPY's deliberate 14-day hole must arrive at the page as a line
+break, refused documents must write no file, and usage errors stay
+exit 2. One e2e lesson: a strict check counts exit-code and pattern
+separately, so the counter moved 324→348 with 21 checks added.
+
+Counts now: 192 swift-testing + 113 XCTest + 348/348 e2e.
+Terminal mode unchanged: still summary/1 bars only.

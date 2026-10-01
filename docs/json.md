@@ -57,9 +57,10 @@ usage error). The flag is position-independent (before or after the
 command).
 
 **Machine consumers**: `dit-chart` (same package) pipes these documents
-into ASCII bar charts — `dit --json | dit-chart [--ascii]`. It only
-accepts schemas it understands (`summary/1` only today; `quote/1`,
-`pnl/1` and anything else are refused with exit 1), and
+into charts — `dit --json | dit-chart [--ascii]` for terminal bars
+(`summary/1` only), or `dit --json | dit-chart --html page.html` for
+one interactive page (`summary/1` plus `quote/1` time series).
+Anything else is refused with exit 1, and
 renders `null` amounts as dashes, never zeros — the
 conventions in this file are exactly what it depends on.
 

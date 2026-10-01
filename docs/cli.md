@@ -486,28 +486,45 @@ dit --json pnl --from 2026-01-01 | my-tool   # machine contract
 ## Charts — `dit-chart` (the pipe renderer)
 
 `dit-chart` is a separate small tool in the same package: it reads
-**one JSON document on stdin** (from any `dit … --json`) and draws
-ASCII bar charts. Format flags decide the output; data decides the
-chart type.
+**one JSON document on stdin** (from any `dit … --json`) and renders
+it — as terminal bar charts, or as ONE self-contained interactive
+HTML page. Format flags decide the output; data decides the chart
+type.
 
 ```
 dit --json | dit-chart                    # summary → charts (Unicode blocks)
 dit --json | dit-chart --ascii            # plain tier (# ^ ?), pure 7-bit
 dit --json | dit-chart --width 100        # drawing width (default: COLUMNS, 80)
-dit --json | dit-chart --svg out.svg      # REFUSED for now (exit 2, honest)
+dit --json | dit-chart --html page.html   # interactive page, one file
+dit --json | dit-chart --html page.html --open    # … and open it
+dit --json | dit-chart --html -           # the page to stdout
+dit --json | dit-chart --svg out.svg      # REFUSED (exit 2, honest — use --html)
 ```
 
-- **Chartable input**: `summary/1` only. Everything else —
-  including `quote/1` and `pnl/1` — is REFUSED (exit 1, "no chart
-  defined for …"), never drawn as "generic bars"; a failed source
-  document (`"ok":false`) prints its message instead of a chart.
+`--html` writes ONE offline file: no CDN, no network — the chart
+data and a ~2 KB drawing script are embedded. It opens in any
+browser on any OS, and hovering any chart shows the EXACT stored
+values (tooltips), never invented ones. The refusal contract carries
+through: unknown or chartless documents produce no file at all.
+Line-chart honesty rules: one chart per stated currency (mixed or
+unstated units never share an axis); ≥10-day data holes BREAK the
+line; backfilled series are dashed and labelled DERIVED; axes start
+at the smallest shown value and say so.
+
+- **Chartable input**: terminal mode draws `summary/1` only.
+  `--html` additionally draws `quote/1` time series as line charts.
+  Everything else — `pnl/1`, single-day snapshot documents, unknown
+  schemas — is REFUSED (exit 1, "no chart defined for …"), never
+  drawn as "generic bars"; a failed source document (`"ok":false`)
+  prints its message instead of a chart.
 - **Honesty carries through the pipe**: null amounts render dashed
   (`—`/`?` marker), never as zero-length bars; derived (backfilled)
   valuations keep their `*` marker and legend; `--offline` docs say
   values are AT COST.
-- **Two glyph tiers** (for cross-platform outlook): the default uses
-  Unicode blocks `█✕▲`; `--ascii` guarantees bytes 128+ appear
-  nowhere (safe for LANG=C, cp936 consoles, and grep-able tests).
+- **Two glyph tiers** (terminal only): the default uses Unicode
+  blocks `█✕▲`; `--ascii` guarantees bytes 128+ appear nowhere
+  (safe for LANG=C, cp936 consoles, and grep-able tests). HTML output
+  sidesteps the console entirely — that is what it is for.
 - **Exit codes** match `dit`: 0 charted, 1 nothing chartable, 2 usage.
 
 ```bash
