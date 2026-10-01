@@ -503,17 +503,22 @@ dit --json | dit-chart --svg out.svg      # REFUSED (exit 2, honest — use --ht
 ```
 
 `--html` writes ONE offline file: no CDN, no network — the chart
-data and a ~2 KB drawing script are embedded. It opens in any
+data and a ~6 KB drawing script are embedded. It opens in any
 browser on any OS, and hovering any chart shows the EXACT stored
 values (tooltips), never invented ones. Bare `--open` keeps ONE
 predictable temp file per chart kind (`dit-chart-<schema>.html` in
 the temp dir, overwritten each run — repeated `--open` never piles
 up files) and prints where it went. The refusal contract carries
 through: unknown or chartless documents produce no file at all.
-Signed bar charts (account totals, P&L, day change) draw a continuous
-dashed zero line with CAD/0 ticks over the whole chart, one shared
-scale on both sides; bars anchor AT the line and never cross it;
-unknown amounts stay dashed, true zeros draw nothing.
+The summary page is a dark insights dashboard: a stat-card strip
+(Total MTM, Total P&L, Today's P&L, Cash, GIC) built ONLY from
+figures the document carries — a missing figure means no card, never
+a "—" filler — and vertical column charts (by account, by holding,
+P&L, day change) with dashed gridlines and a solid zero line on
+plus/minus charts. One shared scale per chart; columns grow FROM
+the zero line and never cross it; quantity charts read one flat
+colour, performance charts green/red by sign; unknown amounts stay
+a dashed stub, true zeros draw nothing.
 Line-chart honesty rules: one chart per stated currency (mixed or
 unstated units never share an axis); ≥10-day data holes BREAK the
 line; backfilled series are dashed and labelled DERIVED; axes start

@@ -58,15 +58,21 @@ public enum ChartRenderer {
         public let rows: [Row]
         /// Explanatory footer lines (glyph meanings, unit warnings).
         public let legend: [String]
+        /// Renderer hint for what the chart MEASURES ("account", "value",
+        /// "pnl", "day"). The terminal renderer ignores it; the HTML
+        /// renderer uses it to pick a colour language — quantity charts
+        /// read one flat colour, performance charts green/red by sign.
+        public let kind: String
 
         /// Memberwise init; `signed: true` selects the zero-line layout.
         public init(title: String, note: String? = nil, signed: Bool,
-                    rows: [Row], legend: [String] = []) {
+                    rows: [Row], legend: [String] = [], kind: String = "") {
             self.title = title
             self.note = note
             self.signed = signed
             self.rows = rows
             self.legend = legend
+            self.kind = kind
         }
     }
 
@@ -157,7 +163,7 @@ public enum ChartRenderer {
                     let label = reporting != display && !reporting.isEmpty ? "\(name) (\(reporting))" : name
                     return Row(label: label, value: dec(account["total"]))
                 },
-                legend: legend))
+                legend: legend, kind: "account"))
         }
 
         // 2. Position value per holding, % of the combined position
@@ -190,7 +196,8 @@ public enum ChartRenderer {
                     note: "bar = market value (or cost when offline), % of combined positions",
                     signed: false,
                     rows: rows,
-                    legend: ["* = valued from a DERIVED (backfilled) quote — approximation, not a market price"]))
+                    legend: ["* = valued from a DERIVED (backfilled) quote — approximation, not a market price"],
+                    kind: "value"))
             }
         }
 
@@ -210,7 +217,7 @@ public enum ChartRenderer {
                 title: "Unrealized P&L per position (\(display))",
                 note: "bar = gain/loss vs cost basis in display currency; % is the native-currency ratio",
                 signed: true,
-                rows: pnlRows))
+                rows: pnlRows, kind: "pnl"))
         }
 
         // 4. Day change per position (same +/- pattern).
@@ -229,7 +236,7 @@ public enum ChartRenderer {
                 title: "Day change per position (\(display))",
                 note: "bar = last quote vs previous stored close, display currency; % is the native-currency ratio",
                 signed: true,
-                rows: dayRows))
+                rows: dayRows, kind: "day"))
         }
 
         return (header, charts)

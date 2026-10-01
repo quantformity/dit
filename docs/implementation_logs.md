@@ -786,3 +786,37 @@ Verified on the real store: 63 plottable bars across the three
 signed charts, all anchored, 0 crossers; unit suite rewritten to pin
 the new form (mixed-sign geometry + all-negative center-line case);
 350/350 e2e (same checks, one renamed).
+
+## Entry 21 — 2026-10-01 — HTML charts adopt the React app's dashboard look
+
+The user pasted a screenshot of the OLD DirectInvestTracker app's
+MarketInsights page (React + Recharts, found at
+~/workspaces/DirectInvestTracker/frontend/src/pages/MarketInsights.tsx)
+and asked for dit-chart --html to carry that look and feel.
+
+Ported, keeping the renderer-only rule: dark #030712 page with
+#1f2937/#374151 cards; a stat-card strip (Total MTM / Total P&L /
+Today's P&L / Cash / GIC) built ONLY from summary/1 `totals`
+strings — a missing figure means NO card, so offline docs show no
+fake numbers; vertical column charts replace the row-per-bar layout
+(flat purple per-account, flat blue per-holding, green/red per-sign
+for P&L and day change — the template's colour language); dashed
+gridlines with a solid zero line; a hover band + dark tooltip that
+prints the document's EXACT strings; and per-chart honest legends
+("dashed stub = …", zero-line note, DERIVED note).
+
+Geometry stays honest: Swift computes each chart's domain (always
+containing zero, padded to nice 1/2/2.5/5×10^n steps), tick labels,
+zero-line fraction, and per-column height fractions; the ~6 KB JS
+paints rects and hover state only — it parses numbers only to draw,
+never to derive money. Columns cannot cross zero by construction
+(|h| ≤ space on its own side), unknowns draw a dashed stub (never a
+zero bar), true zeros draw nothing. Chart/ChartSpec grew a `kind`
+field (account/value/pnl/day) purely so the HTML layer picks colours
+without string-sniffing titles; ASCII output is unchanged.
+
+Verified: 64 columns on the real store, 0 crossing zero, KPI cards
+equal the doc's figures; node --check on the drawing script;
+195 unit tests (three rewritten to assert the payload-level truth —
+shared scale, no-cross bounds, KPI exactness — plus a new no-cards-
+when-empty case); 350/350 e2e debug and release.
