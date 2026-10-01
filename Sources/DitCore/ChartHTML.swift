@@ -54,6 +54,7 @@ public enum ChartHTML {
     private static func summaryPage(_ root: [String: Any], title: String?) throws -> String {
         let jsonData = (try? JSONSerialization.data(withJSONObject: root)) ?? Data()
         let (header, charts) = try ChartRenderer.charts(fromJSON: jsonData)
+        let unit = ((root["data"] as? [String: Any])?["displayCurrency"] as? String) ?? ""
         var blocks = ""
         var drewAnything = false
         for chart in charts {
@@ -62,12 +63,25 @@ public enum ChartHTML {
             drewAnything = true
             let values = plottable.compactMap { $0.value }
             let maxAbs = values.map { abs($0) }.max() ?? Decimal(1)
-            let hasNegative = values.contains { $0 < 0 }
-            let hasPositive = values.contains { $0 > 0 }
-            // Signed charts with both signs share one scale around a
-            // center zero line (mirrors the ASCII zero-line rule).
-            let centerZero = chart.signed && hasNegative && hasPositive
+            // Signed charts get the ASCII zero-line layout: ONE dashed
+            // zero line through the whole chart (not per row), bars
+            // anchored to it, both sides sharing one scale where the
+            // half-track equals maxAbs. Centered even when every bar
+            // is on one side — an all-negative account list still
+            // reads "these are debts measured from zero", and a
+            // shared center keeps scales comparable between charts.
+            let signed = chart.signed
             var inner = ""
+            if signed {
+                // One continuous dashed zero line + CAD/0 ticks, like
+                // the ASCII chart's shared column. It spans only the
+                // bar rows (legends render outside .chart), and the
+                // track column is a fixed-width zone between the two
+                // label columns, so the line sits at TRUE zero for
+                // every row.
+                inner += "<div class=\"zlayer\"><span class=\"u\">\(esc(unit))</span>"
+                    + "<span class=\"z\">0</span><i class=\"line\"></i></div>\n"
+            }
             for row in chart.rows {
                 let amount = (row.value.map { ChartRenderer.moneyLabel($0) } ?? "—")
                     + (row.trailing.isEmpty ? "" : " " + esc(row.trailing))
@@ -77,46 +91,49 @@ public enum ChartHTML {
                     + (marker.isEmpty ? "" : " [\(marker)]")
                 var bar = "<i class=\"dashed\"></i>"
                 if let value = row.value {
-                    let ratio = maxAbs == 0 ? 0
-                        : Double(truncating: NSDecimalNumber(decimal: abs(value)))
-                        / Double(truncating: NSDecimalNumber(decimal: maxAbs))
-                    let width = min(max(ratio * 100, ratio == 0 ? 0 : 1.5), 100)
-                    let w = String(format: "%.1f", width)
-                    if value < 0 && width > 0 {
-                        // Negative bars grow LEFTWARD, ending AT zero.
-                        // On a shared-scale (center-zero) chart both
-                        // halves span the same value range: a negative
-                        // bar's half-track-per-value scale must equal
-                        // the positive side's, or it reads twice as
-                        // long AND crosses the zero line — the exact
-                        // lie the ASCII renderer's half-span rule
-                        // prevents.
-                        if centerZero {
-                            let half = String(format: "%.1f", width / 2)
-                            bar = "<i class=\"neg\" style=\"left:calc(50% - \(half)%);width:\(half)%\"></i>"
-                        } else {
+                    if value == 0 {
+                        // A true zero draws NOTHING (ASCII parity): a
+                        // stub bar or a flat line would read as a
+                        // value. The amount column still says +0.00.
+                        bar = ""
+                    } else {
+                        let scale = signed ? 50.0 : 100.0
+                        let ratio = maxAbs == 0 ? 0
+                            : Double(truncating: NSDecimalNumber(decimal: abs(value)))
+                            / Double(truncating: NSDecimalNumber(decimal: maxAbs))
+                        let width = min(max(ratio * scale, scale * 0.015), scale)
+                        let w = String(format: "%.1f", width)
+                        if signed {
+                            // Bars anchor AT the zero line and grow
+                            // away from it; both sides use the same
+                            // half-track scale (one shared scale, no
+                            // bar may cross the line).
+                            bar = value < 0
+                                ? "<i class=\"neg\" style=\"left:calc(50% - \(w)%);width:\(w)%\"></i>"
+                                : "<i style=\"left:50%;width:\(w)%\"></i>"
+                        } else if value < 0 {
+                            // Unsigned chart with a negative value
+                            // (rare): no zero concept — anchor at the
+                            // right edge, still never across a line.
                             bar = "<i class=\"neg\" style=\"left:calc(100% - \(w)%);width:\(w)%\"></i>"
-                        }
-                    } else if value > 0 && width > 0 {
-                        if centerZero {
-                            let half = String(format: "%.1f", width / 2)
-                            bar = "<i style=\"left:50%;width:\(half)%\"></i>"
                         } else {
                             bar = "<i style=\"width:\(w)%\"></i>"
                         }
-                    } else {
-                        // A true zero stays a flat line, not a stub bar.
-                        bar = "<i class=\"flat\"></i>"
                     }
                 }
-                inner += "<div class=\"row\(row.value == nil ? " unknown" : "")\(centerZero ? " cz" : "")\">"
+                inner += "<div class=\"row\(row.value == nil ? " unknown" : "")\">"
                     + "<span class=\"lab\" title=\"\(esc(tip))\">\(esc(row.label))</span>"
                     + "<span class=\"track\">\(bar)</span>"
                     + "<span class=\"amt\">\(amount)</span></div>\n"
             }
-            if let note = chart.note { inner += "<p class=\"note\">\(esc(note))</p>\n" }
-            for legend in chart.legend { inner += "<p class=\"note\">\(esc(legend))</p>\n" }
-            blocks += "<section><h2>\(esc(chart.title))</h2>\n<div class=\"bars\">\(inner)</div></section>\n"
+            var legend = chart.legend
+            if signed {
+                legend.insert("dashed line marks zero; both sides share one scale", at: 0)
+            }
+            var section = "<section><h2>\(esc(chart.title))</h2>\n<div class=\"chart\(signed ? " signed" : "")\">\n\(inner)</div>\n"
+            if let note = chart.note { section += "<p class=\"note\">\(esc(note))</p>\n" }
+            for line in legend { section += "<p class=\"note\">\(esc(line))</p>\n" }
+            blocks += section + "</section>\n"
         }
         var sublines = header
         if !drewAnything {
@@ -261,11 +278,15 @@ public enum ChartHTML {
         .lab{width:230px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
         .amt{width:190px;text-align:right;font-variant-numeric:tabular-nums}
         .track{flex:1;height:13px;position:relative}
+        .chart{position:relative;padding-top:15px;margin-bottom:8px}
+        .zlayer{position:absolute;top:0;left:238px;right:198px;bottom:3px;pointer-events:none}
+        .zlayer .line{position:absolute;left:50%;top:15px;bottom:0;border-left:1px dashed #c2c2cb}
+        .zlayer .u,.zlayer .z{position:absolute;top:0;font-size:11px;color:#8a8a90;line-height:14px}
+        .zlayer .u{left:0}
+        .zlayer .z{left:50%;transform:translateX(-50%)}
         .track i{position:absolute;top:1px;bottom:1px;left:0;background:#3478c6;border-radius:2px}
         .track i.neg{background:#c65b34}
-        .row.cz .track::before{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:1px solid #b7b7bd}
-        .dashed{width:36px;height:0;top:7px;border-top:3px dashed #b7b7bd;background:none !important}
-        .flat{width:100%;height:0;top:7px;border-top:1px solid #b7b7bd;background:none !important}
+        .track i.dashed{width:36px;height:0;top:7px;border-top:3px dashed #9a9aa2;background:none;opacity:.9}
         canvas{width:100%;height:280px;background:#fff;border:1px solid #e3e3e8;border-radius:6px}
         .legend{font-size:12px;color:#6b6b70;margin:6px 0 0;padding-left:18px}
         #tip{position:fixed;display:none;background:#1c1c1e;color:#f2f2f5;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;padding:6px 9px;border-radius:6px;pointer-events:none;white-space:pre;z-index:9}

@@ -510,6 +510,10 @@ predictable temp file per chart kind (`dit-chart-<schema>.html` in
 the temp dir, overwritten each run — repeated `--open` never piles
 up files) and prints where it went. The refusal contract carries
 through: unknown or chartless documents produce no file at all.
+Signed bar charts (account totals, P&L, day change) draw a continuous
+dashed zero line with CAD/0 ticks over the whole chart, one shared
+scale on both sides; bars anchor AT the line and never cross it;
+unknown amounts stay dashed, true zeros draw nothing.
 Line-chart honesty rules: one chart per stated currency (mixed or
 unstated units never share an axis); ≥10-day data holes BREAK the
 line; backfilled series are dashed and labelled DERIVED; axes start

@@ -761,3 +761,28 @@ All-negative charts keep zero at the right edge (also ASCII-parity).
 Two regression tests pin it: exact geometry for the mixed-sign case
 (reconstructed from the screenshot's values) and the all-negative
 edge rule; both fail loudly against the old form.
+
+## Entry 20 — 2026-10-01 — HTML bars match the ASCII zero-line layout
+
+User asked for the HTML bar charts to look like the ASCII version
+(screenshot of the terminal output): one continuous dashed zero
+column through the whole signed chart, "CAD" and "0" ticks above it,
+legend lines beneath, and a stronger guarantee that bars anchor at
+zero (Entry 19 had fixed mixed-sign charts; all-negative ones still
+read awkwardly with zero pinned to the track edge).
+
+New layout rule, one sentence: SIGNED charts always center the zero
+line with one shared half-track scale (half = maxAbs), bars grow
+FROM the line; a true zero draws nothing; unknowns stay dashed.
+That is the ASCII parity promise — and because the bar geometry is
+now written as `calc(50% - w); width:w` for negatives and
+`left:50%; width:w` for positives, "never crosses the line" is true
+BY CONSTRUCTION (a bar cannot reach past 50% because its width caps
+at 50%), not just by assertion. The zlayer (line + ticks) spans only
+the bar rows — legends sit outside the chart box, so the line stops
+above them, as in the screenshot.
+
+Verified on the real store: 63 plottable bars across the three
+signed charts, all anchored, 0 crossers; unit suite rewritten to pin
+the new form (mixed-sign geometry + all-negative center-line case);
+350/350 e2e (same checks, one renamed).

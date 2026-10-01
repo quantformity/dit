@@ -85,7 +85,7 @@ struct ChartHTMLTests {
                 "no stale calc form that lengthens negatives across zero")
     }
 
-    @Test func allNegativeSignedChartKeepsZeroAtTheRightEdge() throws {
+    @Test func allNegativeSignedChartKeepsTheCenterZeroLayout() throws {
         let doc = """
         {"ok":true,"schema":"summary/1","data":{
           "displayCurrency":"CAD",
@@ -94,12 +94,17 @@ struct ChartHTMLTests {
           "holdings":[],"totals":{}}}
         """
         let page = try ChartHTML.document(fromJSON: Data(doc.utf8))
-        // No mixed signs → no center line; bars grow leftward from
-        // the RIGHT edge (zero there), largest magnitude fills it.
+        // The user-requested layout: the zero line stays CENTERED on
+        // signed charts even when every value is negative (that is
+        // what the ASCII chart shows and what makes charts
+        // comparable). Bars grow LEFTWARD from the line; the full-
+        // scale bar (B = maxAbs) fills exactly the left half.
+        #expect(page.contains("class=\"chart signed\""), "center-zero layout is on")
+        #expect(page.contains("class=\"line\""), "one continuous dashed zero line")
         let big = try #require(page.components(separatedBy: "\n").first { $0.contains("B</span") })
-        #expect(big.contains("left:calc(100% - 100.0%);width:100.0%"),
-                "max negative fills from the zero edge (got: \(big))")
-        #expect(!page.contains("class=\"row cz"), "no fake zero line without mixed signs")
+        #expect(big.contains("left:calc(50% - 50.0%);width:50.0%"),
+                "max negative fills exactly the left half (got: \(big))")
+        #expect(page.contains("both sides share one scale"), "legend says what the line means")
     }
 
     @Test func moneyLabelsAreTheDocumentOwnStrings() throws {
