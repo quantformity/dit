@@ -744,3 +744,20 @@ separately, so the counter moved 324→348 with 21 checks added.
 
 Counts now: 192 swift-testing + 113 XCTest + 348/348 e2e.
 Terminal mode unchanged: still summary/1 bars only.
+
+## Entry 19 — 2026-10-01 — HTML bar geometry bug: negatives crossed the zero line
+
+User screenshot from the real store: the "Day change per position"
+page showed AAPL (−3,226) and TEM (−768) as red bars starting at the
+LEFT EDGE and stretching PAST the center zero line. Two lies in one
+shape: negatives used the full track width (2× the positives' scale)
+and their anchor put part of the bar in the positive half. The ASCII
+renderer had this right from day one (half-span `cells(...)` around a
+zero column); the HTML port lost it.
+
+Fixed: center-zero negatives now `left:calc(50% - w/2); width:w/2` —
+grow leftward, end AT the line, one shared scale (mirrors ASCII).
+All-negative charts keep zero at the right edge (also ASCII-parity).
+Two regression tests pin it: exact geometry for the mixed-sign case
+(reconstructed from the screenshot's values) and the all-negative
+edge rule; both fail loudly against the old form.

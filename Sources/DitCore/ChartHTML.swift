@@ -83,9 +83,20 @@ public enum ChartHTML {
                     let width = min(max(ratio * 100, ratio == 0 ? 0 : 1.5), 100)
                     let w = String(format: "%.1f", width)
                     if value < 0 && width > 0 {
-                        // Negative bars grow LEFTWARD, ending at zero.
-                        let side = centerZero ? "calc(50% - \(w)% / 2)" : "calc(100% - \(w)%)"
-                        bar = "<i class=\"neg\" style=\"left:\(side);width:\(w)%\"></i>"
+                        // Negative bars grow LEFTWARD, ending AT zero.
+                        // On a shared-scale (center-zero) chart both
+                        // halves span the same value range: a negative
+                        // bar's half-track-per-value scale must equal
+                        // the positive side's, or it reads twice as
+                        // long AND crosses the zero line — the exact
+                        // lie the ASCII renderer's half-span rule
+                        // prevents.
+                        if centerZero {
+                            let half = String(format: "%.1f", width / 2)
+                            bar = "<i class=\"neg\" style=\"left:calc(50% - \(half)%);width:\(half)%\"></i>"
+                        } else {
+                            bar = "<i class=\"neg\" style=\"left:calc(100% - \(w)%);width:\(w)%\"></i>"
+                        }
                     } else if value > 0 && width > 0 {
                         if centerZero {
                             let half = String(format: "%.1f", width / 2)

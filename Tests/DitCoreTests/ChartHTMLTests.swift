@@ -57,6 +57,51 @@ struct ChartHTMLTests {
         #expect(neg.contains("calc(50%"), "negative bar anchors around the center zero")
     }
 
+    @Test func signedBarsShareOneScaleAroundTheZeroLine() throws {
+        let page = try ChartHTML.document(fromJSON: Data(summaryDoc.utf8))
+        // BAD (-456.70) vs GOOD (1234.50): shared scale means each
+        // side's FULL HALF equals maxAbs. BAD's bar must be
+        // 456.70/1234.50 ≈ 37% of the track → 18.5% of the whole
+        // track, ending exactly AT the 50% zero line — never longer
+        // and never crossing it.
+        let neg = try #require(page.components(separatedBy: "\n").first { $0.contains("class=\"neg\"") })
+        #expect(neg.contains("left:calc(50% - 18.5%);width:18.5%"),
+                "negative bar: half-scale, anchored left of zero, ends at zero (got: \(neg))")
+        // The positive partner starts at 50% with the SAME scale
+        // (1234.50 = maxAbs → full 50% half).
+        let pos = try #require(page.components(separatedBy: "\n").first { $0.contains("GOOD") })
+        #expect(pos.contains("left:50%;width:50.0%"),
+                "full-scale positive fills its half (got: \(pos))")
+        // And a negative's total footprint must never reach past the
+        // zero line (the exact bug: full-width negatives crossed into
+        // the positive half and read as gains).
+        // And a negative's total footprint must never reach past the
+        // zero line (the exact bug: "calc(50% - 37.0% / 2);width:
+        // 37.0%" spanned 31.5%→68.5% — double scale AND across the
+        // line). The fixed form keeps the whole bar in the negative
+        // half at the shared scale; "/ 2)" would only ever appear in
+        // the old broken calc (the JS midline helper writes "/2,").
+        #expect(!page.contains(" / 2)"),
+                "no stale calc form that lengthens negatives across zero")
+    }
+
+    @Test func allNegativeSignedChartKeepsZeroAtTheRightEdge() throws {
+        let doc = """
+        {"ok":true,"schema":"summary/1","data":{
+          "displayCurrency":"CAD",
+          "accounts":[{"name":"A","reportingCurrency":"CAD","total":"-10.00"},
+                      {"name":"B","reportingCurrency":"CAD","total":"-40.00"}],
+          "holdings":[],"totals":{}}}
+        """
+        let page = try ChartHTML.document(fromJSON: Data(doc.utf8))
+        // No mixed signs → no center line; bars grow leftward from
+        // the RIGHT edge (zero there), largest magnitude fills it.
+        let big = try #require(page.components(separatedBy: "\n").first { $0.contains("B</span") })
+        #expect(big.contains("left:calc(100% - 100.0%);width:100.0%"),
+                "max negative fills from the zero edge (got: \(big))")
+        #expect(!page.contains("class=\"row cz"), "no fake zero line without mixed signs")
+    }
+
     @Test func moneyLabelsAreTheDocumentOwnStrings() throws {
         let page = try ChartRenderer.moneyLabel(1234.50)
         #expect(page == "1,234.50", "display formatting stays grouped and Decimal-exact")
