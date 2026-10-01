@@ -392,6 +392,77 @@ expect_ok_match "stmt: multi-ccy all-accounts view splits too"   "Bal USD"     "
 expect_ok_match "stmt: USD account balance speaks USD" "USD" "$DIT" tx list --account "Mercury Bank"
 
 echo
+echo "-- 19. Historical P&L windows (dit pnl) — derived, dashed when unsure --"
+# A dedicated store with SEEDED market closes so the position-drift half
+# of the answer is checkable offline: WIDE @5 (Jun 10) → close 6.00
+# (Jun 30) → close 8.00 (Jul 31); July sells 5 @8 and books a 7 div.
+# July window math is pinned: realized 22.00, Position Δ 5.00, Total
+# 27.00 — the components must add to the economic truth (15 sale gain
+# + 7 dividend + the 5→8 drift on the half still held).
+PD="$WORKDIR/pnl-store"
+mkdir -p "$PD/store" "$PD/market"
+pnl() { env DIT_BACKEND=file DIT_STORE_URL="$PD/store" DIT_MARKET_URL="$PD/market" "$DIT" "$@"; }
+expect_ok "pnl: bootstrap account"           pnl account add --currency USD --name "P&L One"
+expect_ok "pnl: register ticker"             pnl ticker add WIDE --currency USD
+expect_ok "pnl: deposit"                     pnl tx deposit --account "P&L One" --amount 1000 --date 2026-06-10
+expect_ok "pnl: buy 10 WIDE @ 5"             pnl tx buy --account "P&L One" --ticker WIDE --shares 10 --price 5 --date 2026-06-10
+printf '%s\n' 'WIDE,2026-06-30,6.00' 'WIDE,2026-07-31,8.00' > "$WORKDIR/pnl-closes.csv"
+expect_ok_match "pnl: seed window-crossing closes" "2 point"  pnl market import "$WORKDIR/pnl-closes.csv"
+expect_ok "pnl: sell 5 @ 8 inside window"    pnl tx sell --account "P&L One" --ticker WIDE --shares 5 --price 8 --date 2026-07-10
+expect_ok "pnl: dividend 7 inside window"    pnl tx dividend --account "P&L One" --ticker WIDE --amount 7 --date 2026-07-20
+expect_ok_match "pnl: default runs the WHOLE ledger" "full history" pnl pnl
+expect_ok_match "pnl: July window splits the components" "22\.00"   pnl pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: …position Δ 5 and total 27 (22+5, no double count)" "5\.00.*27\.00|27\.00" pnl pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: June-only window shows the drift-only story" "10\.00" pnl pnl --to 2026-06-30
+expect_ok "pnl: empty window is quiet, exit 0"  pnl pnl --from 2020-01-01 --to 2020-01-31
+expect_ok_match "pnl: empty window says so"  "nothing to report"  pnl pnl --from 2020-01-01 --to 2020-01-31
+# Horizon tokens are inclusive day-spans ending today (or --to).
+expect_ok_match "pnl: --horizon 2w accepted" "Historical P&L"     pnl pnl --horizon 2w
+expect_ok_match "pnl: ytd accepted"          "ytd"                pnl pnl --horizon ytd
+expect_ok_match "pnl: per-account mode when --account names it"  "P&L One"  pnl pnl --account "P&L One"
+expect_ok_match "pnl: tickers filter narrows" "WIDE"              pnl pnl --tickers WIDE --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: filter matching nothing says nothing" "nothing|none with" pnl pnl --tickers NOPE
+expect_ok_match "pnl: ccy filter honored (USD kept)" "WIDE"       pnl pnl --ccy USD
+expect_ok_match "pnl: ccy filter excludes other currencies" "nothing|none with" pnl pnl --ccy GBP
+expect_fail_match "pnl: unknown horizon is a usage error"     2 "horizon"        pnl pnl --horizon 5x
+expect_fail_match "pnl: horizon and dates cannot mix"         2 "combined"       pnl pnl --horizon 1w --from 2026-01-01
+expect_fail_match "pnl: reversed dates refused, not swapped"  2 "before"         pnl pnl --from 2026-07-31 --to 2026-07-01
+expect_fail_match "pnl: bad date is a usage error"            2 "date"           pnl pnl --from 2026-02-30
+expect_fail_match "pnl: unknown account errors (not 'all')"   1 "no account matches" pnl pnl --account NOPE
+expect_fail_match "pnl: positional argument refused"          2 "unexpected"     pnl pnl USD
+# No market data at all: a position that CROSSES the window boundary
+# cannot have its drift measured — realized still prints EXACT, the
+# position columns dash, the currency total is withheld, and the report
+# declares why. Never a quiet zero, never a disguised guess.
+PD2="$WORKDIR/pnl-store-nomkt"
+mkdir -p "$PD2/store" "$PD2/market"
+pnl2() { env DIT_BACKEND=file DIT_STORE_URL="$PD2/store" DIT_MARKET_URL="$PD2/market" "$DIT" "$@"; }
+expect_ok "pnl2: same ledger, no market data" pnl2 account add --currency USD --name "P&L One"
+expect_ok "pnl2: buy before window"          pnl2 tx buy --account "P&L One" --ticker WIDE --shares 10 --price 5 --date 2026-06-10
+expect_ok "pnl2: sell inside window"         pnl2 tx sell --account "P&L One" --ticker WIDE --shares 5 --price 8 --date 2026-07-10
+expect_ok "pnl2: dividend inside window"     pnl2 tx dividend --account "P&L One" --ticker WIDE --amount 7 --date 2026-07-20
+expect_ok_match "pnl2: realized still prints exactly" "22\.00"    pnl2 pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl2: …and the gap is declared" "no usable daily history|dashed" pnl2 pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl2: total withheld, not faked" "—"             pnl2 pnl --from 2026-07-01 --to 2026-07-31
+# FX combining stays honest: with a stored USD/CAD rate the combined
+# line appears WITH its rates quoted; without, it is withheld.
+expect_ok "pnl: add a CAD account"           pnl account add --currency CAD --name "P&L Two"
+printf '%s\n' 'USD/CAD,2026-07-31,1.4' > "$WORKDIR/pnl-fx.csv"
+expect_ok_match "pnl: seed a stored FX rate"  "USD/CAD"           pnl market import "$WORKDIR/pnl-fx.csv"
+expect_ok "pnl: USD dividend in a CAD account (mixed view)" pnl tx dividend --account "P&L Two" --ticker SHOP.TO --amount 14 --currency USD --date 2026-07-21
+expect_ok_match "pnl: mixed view converts at quoted rates" "combined at stored rates: USD→CAD 1\.4" pnl pnl
+expect_ok_match "pnl: native rows stay unconverted" "CAD"         pnl pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: explicit reporting ccy" "P&L currency: USD" pnl pnl --reporting-ccy USD
+# --json is a first-class contract here: nulls for unmeasurable,
+# exact fixed-scale decimals, provenance kept.
+json_ok "pnl: json document parses"                           pnl --json pnl
+expect_ok_match "pnl: json keeps the split components" '"realized":"22\.00".*"total":"27\.00"' pnl --json pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: json window + scope echo" '"fromLedgerStart":false' pnl --json pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: json marks derived basis (none here = observed)" '"basis":"observed"' pnl --json pnl
+expect_ok_match "pnl: json without market data nulls the change" '"positionChange":null' pnl2 --json pnl
+expect_fail_match "pnl: chart refuses pnl/1 honestly" 1 "no chart defined" bash -c "'$DIT' --json --store '$PD/store' --market-store '$PD/market' pnl | '$CHART'"
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"

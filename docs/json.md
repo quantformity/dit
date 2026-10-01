@@ -49,6 +49,7 @@ no tables — even on errors.
 | `dit --json account show NAME [--history]` | `account/1` |
 | `dit --json quote SYM… [--as-of DATE \| --from DATE --to DATE]` | `quote/1` (live / store / series) |
 | `dit --json quote CCY/CCY/CCY[/…] [--as-of DATE]` | `quote/1` (`"mode":"matrix"`) |
+| `dit --json pnl [window/filter options]` | `pnl/1` |
 
 Everything else refuses. `--json` takes no value (`--json=1` is a
 usage error). The flag is position-independent (before or after the
@@ -56,8 +57,9 @@ command).
 
 **Machine consumers**: `dit-chart` (same package) pipes these documents
 into ASCII bar charts — `dit --json | dit-chart [--ascii]`. It only
-accepts schemas it understands (`summary/1` today), refuses others
-with exit 1, and renders `null` amounts as dashes, never zeros — the
+accepts schemas it understands (`summary/1` and `quote/1` series
+today; `pnl/1` and anything else are refused with exit 1), and
+renders `null` amounts as dashes, never zeros — the
 conventions in this file are exactly what it depends on.
 
 ## Global value conventions
@@ -339,6 +341,60 @@ appears when neither a direct pair nor both USD legs are known)
   and mixing the chain with other requests are usage errors (exit 2,
   error envelope under `--json`); a chain where NOT one rate is known
   is a runtime error (exit 1).
+
+## `pnl/1` — `dit --json pnl [WINDOW & FILTER OPTIONS]`
+
+Windowed historical P&L. One document, two honest halves: `realized`
+(ledger fact, always exact) and `positionChange` (mark-to-mark drift,
+only when a price pair exists). Amounts are fixed 2-decimal strings;
+an **unmeasurable** value is `null`, never `"0.00"` and never a
+partially-known sum.
+
+```json
+{"ok":true,"schema":"pnl/1","data":{
+  "window":{"label":"custom","start":"2026-07-01","end":"2026-07-31","fromLedgerStart":false},
+  "scope":{"accounts":"all","tickers":"all","currencies":"all","reportingCurrency":"CAD","perAccount":false},
+  "positions":[{"symbol":"WIDE","kind":"position","accounts":["P&L One"],"currency":"USD",
+                "realized":"22.00","positionChange":"5.00","total":"27.00","basis":"observed"}],
+  "currencyTotals":[{"currency":"USD","realized":"36.00","positionChange":"5.00","total":"41.00","incompletePositions":0}],
+  "combined":{"currency":"CAD","value":"57.40"},
+  "activityCount":3,"notes":[]}}
+```
+
+The same ledger with NO usable daily history — the gap stays visible:
+
+```json
+{"ok":true,"schema":"pnl/1","data":{
+  "positions":[{"symbol":"WIDE","kind":"position","accounts":["P&L One"],"currency":"USD",
+                "realized":"22.00","positionChange":null,"total":null,"basis":null}],
+  "currencyTotals":[{"currency":"USD","realized":"22.00","positionChange":null,"total":null,"incompletePositions":1}],
+  "combined":null,
+  "notes":["no usable daily history for: WIDE — …"]}}
+```
+
+Contract details:
+
+- `window.fromLedgerStart` is `true` for the default/`--to` forms
+  (window opens at the first trade, where holdings sit at cost).
+- `positionChange`/`total` `null` = no price pair for that position
+  across the window; `"0.00"` = measured and actually zero. `total`
+  is only present when BOTH halves are known (`total` is not
+  `realized + 0` pretending to be a full answer).
+- `basis`: `"observed"` (real stored closes), `"derived"` (backfilled
+  proxy history — an approximation), `null` (no price data at all).
+  Never guess from a number alone; check this field.
+- `currencyTotals` are **native and exact**: a total is `null` when
+  any contributing position is incomplete, and incomplete positions
+  are counted in `incompletePositions` (they drop out of the total).
+- `combined` is the reporting-currency sum, `null` unless every
+  currency converted honestly. Rates are NOT embedded per row; the
+  text view quotes them.
+- `scope`/`window` echo what was actually applied — filters never
+  widen silently, and an empty result is `{"positions":[],
+  "currencyTotals":[]}` with exit 0, not an error.
+- `kind`: `"cash"` = P&L with no market instrument (GIC redemption),
+  `"position"` = keyed by a ticker (a dividend-only line has
+  `positionChange:"0.00"` — no position, nothing to mark).
 
 ## Scripting notes
 

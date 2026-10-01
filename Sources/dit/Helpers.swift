@@ -196,17 +196,21 @@ func taxableFlag(_ options: Options) throws -> Bool? {
 }
 
 /// Strict `YYYY-MM-DD` parse (UTC midnight); shape AND calendar are
-/// checked, so "2026-02-30" fails instead of rolling over.
+/// checked, so "2026-02-30" fails instead of rolling over. The
+/// round-trip comparison is the calendar check: `Calendar.date(from:)`
+/// happily rolls Feb 30 → Mar 2, but the rolled day no longer prints
+/// back as the text the user typed.
 func parseDate(_ raw: String) throws -> Date {
     let parts = raw.split(separator: "-", omittingEmptySubsequences: false)
     guard parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
           let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
           (1...12).contains(month), (1...31).contains(day),
-          let date = utcDate(year: year, month: month, day: day)
+          let candidate = utcDate(year: year, month: month, day: day),
+          shortDate(candidate) == raw
     else {
         throw ParseError("invalid date '\(raw)' — expected YYYY-MM-DD")
     }
-    return date
+    return candidate
 }
 
 /// UTC-midnight date from components, `nil` if the day does not exist.

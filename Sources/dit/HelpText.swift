@@ -28,6 +28,7 @@ func helpText(for invocation: Invocation) -> String {
           dit store <sub> [args]     path / export / backup / import (see: dit store --help)
           dit market <sub> [args]     market-data store (see: dit market --help)
           dit quote <SYM> [...]      live price lookup (see: dit quote --help)
+          dit pnl [options]          historical P&L (see: dit pnl --help)
           dit help [command]         help
 
           Global options: --display CCY, --offline, --json, --backend
@@ -37,7 +38,8 @@ func helpText(for invocation: Invocation) -> String {
 
           Machine-readable output: 'dit --json …' prints one JSON
           document (also for errors) for summary, accounts, account
-          show and quote — schemas and conventions in docs/json.md.
+          show, quote and pnl — schemas and conventions in
+          docs/json.md.
           Pipe it to the chart tool: 'dit --json | dit-chart --ascii'
           (see 'dit-chart --help' — it refuses documents it cannot
           honestly chart).
@@ -344,6 +346,52 @@ func helpText(for invocation: Invocation) -> String {
             dit quote USD/CAD/HKD/EUR --as-of 2026-09-25 --offline
             dit quote TSLA TSLA.NE --from 2026-09-01 --to 2026-09-30 --json
         """
+    case ("pnl", _):
+        return """
+        USAGE: dit pnl [--horizon H | --from DATE [--to DATE]] [--account A[,A...]]
+               [--tickers T[,T...]] [--ccy C[,C...]] [--reporting-ccy CCY]
+               [--json] [--offline] [--display CCY] [--store PATH]
+
+          Historical P&L between dates, built from the ledger and the
+          market store — two components, never merged:
+            Realized    what the ledger booked inside the window (sale
+                        gains over cost, GIC redemption gains,
+                        dividends net of fees).
+            Position Δ  mark-to-market drift across the window: value
+                        at the window's closing mark minus its value
+                        at the close before it opened.
+          They add to the window's economic result without double
+          counting; without a usable price pair at BOTH boundaries
+          the Position Δ and Total are dashed — never guessed.
+
+          Windows are inclusive on both ends. --horizon: Nd/Nw/Nm/Ny
+          (e.g. 5d, 2w, 3m, 2y) counted back from --to or today, and
+          'ytd'. No flags: the full ledger (exact by construction —
+          nothing was held before the first trade). --to alone: from
+          the ledger's first transaction to that date. --horizon and
+          --from/--to are mutually exclusive (exit 2).
+
+          Scope: no --account aggregates the whole portfolio into one
+          view (rows merge across accounts); --account names you asked
+          for THEM — rows stay per account. --tickers and --ccy filter
+          positions; a filter that matches nothing reports "nothing",
+          it never silently widens back to everything.
+
+          Money rules: every row is native currency; the combined
+          total appears only when every currency converts (stored
+          latest rates, triangulated via USD when no direct pair —
+          marked and labelled). --reporting-ccy picks the combining
+          currency (default: --display, CAD otherwise). Prices and
+          rates come from the market store only — this command never
+          fetches ('dit market history' fills it).
+
+          EXAMPLES
+            dit pnl
+            dit pnl --horizon 1y
+            dit pnl --horizon 3m --json | dit-chart --ascii
+            dit pnl --from 2026-01-01 --to 2026-09-30 --reporting-ccy USD
+            dit pnl --account "TFSA" --tickers RBLX.NE --ccy USD
+        """
     default:
         return """
         USAGE: dit [command] [options]
@@ -357,6 +405,7 @@ func helpText(for invocation: Invocation) -> String {
           dit store <sub> [args]     path / export / backup / import (see: dit store --help)
           dit market <sub> [args]     market-data store (see: dit market --help)
           dit quote <SYM> [...]      live price lookup (see: dit quote --help)
+          dit pnl [options]          historical P&L (see: dit pnl --help)
           dit help [command]         help
 
           Global options: --display CCY, --offline, --backend file|sqlite,

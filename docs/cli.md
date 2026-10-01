@@ -380,6 +380,62 @@ dit quote USD/CAD/HKD/EUR                     # live matrix
 dit quote USD/CAD/HKD/EUR --as-of 2026-09-25  # one stored day
 ```
 
+## Historical P&L — `dit pnl`
+
+```
+dit pnl                                     # full ledger history (default)
+dit pnl --horizon 2w|3m|1y|ytd|90d          # relative window ending today
+dit pnl --from DATE [--to DATE]             # explicit window (both ends inclusive)
+dit pnl --to DATE                           # ledger start … DATE
+dit pnl [--account A[,B]] [--tickers S[,S]] [--ccy USD[,CAD]] [--reporting-ccy CAD]
+```
+
+Pure store read — never the network. Two columns answer two different
+questions and are **never conflated**:
+
+- **Realized** — booked ledger facts inside the window: sale proceeds
+  over proportional cost, dividends net of fees, GIC redemptions over
+  principal. Exact, because it is what the ledger says happened.
+- **Position Δ** — mark-to-market drift: value of holdings at the last
+  close *strictly before* `FROM` versus the last close *by the window
+  end*. Derived, and dashed when no usable price pair exists.
+
+`Total = Realized + Position Δ` is printed **only when both are
+known**. A position that drifted without any trade still appears (the
+drift IS the window's P&L); a quiet zero-drift position does not.
+
+Honesty rules the report will not break:
+
+- Default window starts at your first trade, where holdings sit at
+  cost — so the default report needs no baseline price and is exact.
+- No price pair → Position Δ and Total dash, the position is excluded
+  from currency totals, and a footnote names the symbols and how to
+  fill the gap (`dit market history --all`). A total with a missing
+  half is worse than a dash.
+- Per-currency rows stay **native and exact**; a combined
+  `Total (P&L currency …)` line appears only when every currency
+  total is complete and every needed rate is stored — and it quotes
+  the actual rate used (`combined at stored rates: USD→CAD 1.4`).
+  Otherwise it is withheld, not guessed. FX pair series count as
+  stored rates.
+- Position series explicitly stored in a *different* currency than
+  the holding are never used (different instrument, not a conversion).
+
+Usage errors (exit 2): mixing `--horizon` with `--from/--to`, unknown
+horizon token, malformed or impossible date, `--to` before `--from`,
+stray positional. An unknown `--account` is a lookup error (exit 1).
+Filters that match nothing exit 0 with a quiet message — filters
+never silently widen back to "all". `--json` emits `pnl/1` (see
+`docs/json.md`).
+
+```bash
+dit pnl --horizon 1m                       # last month's story
+dit pnl --account "CAD TSFA"               # per-account tables
+dit pnl --tickers TSLA.NE --ccy CAD        # one instrument
+dit pnl --to 2026-06-30 --reporting-ccy USD
+dit --json pnl --from 2026-01-01 | my-tool   # machine contract
+```
+
 ## Charts — `dit-chart` (the pipe renderer)
 
 `dit-chart` is a separate small tool in the same package: it reads
@@ -394,10 +450,9 @@ dit --json | dit-chart --width 100        # drawing width (default: COLUMNS, 80)
 dit --json | dit-chart --svg out.svg      # REFUSED for now (exit 2, honest)
 ```
 
-- **Chartable input**: `summary/1` today — account totals, position
-  values (% of combined), unrealized P&L, and day change as ± bar
-  charts with a zero line at one shared scale. Unknown schemas are
-  REFUSED (exit 1), never drawn as "generic bars"; a failed source
+- **Chartable input**: `summary/1` and `quote/1` series. Unknown
+  schemas — including `pnl/1` — are REFUSED (exit 1, "no chart
+  defined for …"), never drawn as "generic bars"; a failed source
   document (`"ok":false`) prints its message instead of a chart.
 - **Honesty carries through the pipe**: null amounts render dashed
   (`—`/`?` marker), never as zero-length bars; derived (backfilled)

@@ -496,3 +496,37 @@ and the user decides.
   lookup) key off the grid's shape — a data row's ID is the 8-hex
   field after the `│` wall — so they are format-proof against
   further style changes. 190/190 + full unit suite green.
+
+## 2026-09-30 — `dit pnl`: windowed historical P&L (library + CLI + e2e §19)
+- New read path `PnLWindow` (library) + `dit pnl` (CLI). Pure store
+  read, never network. Window forms: default = FULL ledger, `--horizon`
+  (Nd/Nw/Nm/Ny/ytd), or explicit `--from`/`--to`; mixing forms is a
+  usage error (exit 2). Window semantics: ledger events with
+  FROM ≤ d ≤ TO are the window; the baseline price is strictly BEFORE
+  FROM. Default starts at the first trade, where holdings sit at cost,
+  so the default report needs no baseline price and is exact.
+- P&L stays decomposed: `Realized` (ledger truth: sale over
+  proportional cost, dividends net of fees, GIC redemptions over
+  principal — mirroring AccountBalances, including the
+  redemption-without-purchase skip) and `Position Δ` (mark-to-mark
+  across the window). `Total` only when BOTH are known; realized-only
+  hides real drift, a half-known sum is worse than a dash.
+- Two-boundary replay: state is replayed strictly-before-window and
+  through-window-end; the window's realized is the DIFFERENCE of the
+  two, so slices reconcile with full history by construction.
+- Drift-only stories appear (a position that merely drifted is the
+  window's P&L); quiet zero-drift positions do not. Shorts created
+  inside the window are flagged, not silently valued.
+- Series currency rule: exact match trusted; UNLABELLED imports are
+  taken at face value in the position's currency; a series explicitly
+  in another currency is never used. Combined totals require every
+  currency complete AND every rate stored (latest rates + FX pair
+  series both seed the rate closure); otherwise withheld.
+- Fixed on the way: `parseDate` now round-trips, so impossible dates
+  like 2026-02-30 exit 2 instead of silently rolling to Mar 2.
+- `--json` emits `pnl/1` (docs/json.md): nulls for unmeasurable,
+  fixed-scale strings, `basis` observed/derived/null. `dit-chart`
+  refuses `pnl/1` (exit 1) until a chart shape is designed — refusal
+  is the honest default.
+- e2e §19 pins the math (July window: realized 22 + drift 5 = 27)
+  and the dash/withheld semantics across 52 new checks: 242/242.
