@@ -396,9 +396,12 @@ echo "-- 19. Historical P&L windows (dit pnl) — derived, dashed when unsure --
 # A dedicated store with SEEDED market closes so the position-drift half
 # of the answer is checkable offline: WIDE @5 (Jun 10) → close 6.00
 # (Jun 30) → close 8.00 (Jul 31); July sells 5 @8 and books a 7 div.
-# July window math is pinned: realized 22.00, Position Δ 5.00, Total
-# 27.00 — the components must add to the economic truth (15 sale gain
-# + 7 dividend + the 5→8 drift on the half still held).
+# A DAILY USD/CAD series at one flat 1.40 lets the reporting view
+# convert: text output speaks CAD ONLY — July's native 22.00 + 5.00 =
+# 27.00 USD must appear AS 30.80 + 7.00 = 37.80 CAD (exactly ×1.40).
+# The native split lives on in --json. Default-window checks pin
+# --to 2026-10-01 so the FX-staleness rules cannot make this script
+# depend on the day it runs.
 PD="$WORKDIR/pnl-store"
 mkdir -p "$PD/store" "$PD/market"
 pnl() { env DIT_BACKEND=file DIT_STORE_URL="$PD/store" DIT_MARKET_URL="$PD/market" "$DIT" "$@"; }
@@ -408,12 +411,23 @@ expect_ok "pnl: deposit"                     pnl tx deposit --account "P&L One" 
 expect_ok "pnl: buy 10 WIDE @ 5"             pnl tx buy --account "P&L One" --ticker WIDE --shares 10 --price 5 --date 2026-06-10
 printf '%s\n' 'WIDE,2026-06-30,6.00' 'WIDE,2026-07-31,8.00' > "$WORKDIR/pnl-closes.csv"
 expect_ok_match "pnl: seed window-crossing closes" "2 point"  pnl market import "$WORKDIR/pnl-closes.csv"
+# Daily FX history, flat rate — conversion math stays hand-checkable.
+: > "$WORKDIR/pnl-fx.csv"
+fxd=2026-06-01
+while [[ "$fxd" < "2026-11-02" ]]; do
+  printf 'USD/CAD,%s,1.40\n' "$fxd" >> "$WORKDIR/pnl-fx.csv"
+  fxd=$(date -j -v+1d -f "%Y-%m-%d" "$fxd" +%Y-%m-%d)
+done
+expect_ok_match "pnl: seed a daily USD/CAD history" "USD/CAD"     pnl market import "$WORKDIR/pnl-fx.csv"
 expect_ok "pnl: sell 5 @ 8 inside window"    pnl tx sell --account "P&L One" --ticker WIDE --shares 5 --price 8 --date 2026-07-10
 expect_ok "pnl: dividend 7 inside window"    pnl tx dividend --account "P&L One" --ticker WIDE --amount 7 --date 2026-07-20
 expect_ok_match "pnl: default runs the WHOLE ledger" "full history" pnl pnl
-expect_ok_match "pnl: July window splits the components" "22\.00"   pnl pnl --from 2026-07-01 --to 2026-07-31
-expect_ok_match "pnl: …position Δ 5 and total 27 (22+5, no double count)" "5\.00.*27\.00|27\.00" pnl pnl --from 2026-07-01 --to 2026-07-31
-expect_ok_match "pnl: June-only window shows the drift-only story" "10\.00" pnl pnl --to 2026-06-30
+expect_ok_match "pnl: default converts at DATED FX (as-of Sep 30)" "converted at USD→CAD 1\.4" pnl pnl --to 2026-10-01
+expect_ok_match "pnl: July converts 22.00 USD into 30.80 CAD" "30\.80"   pnl pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: …and Δ 7.00 with total 37.80 (30.80+7.00, no double count)" "7\.00.*37\.80|37\.80" pnl pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: June drift-only story reads 14.00 CAD" "14\.00" pnl pnl --to 2026-06-30
+expect_ok_match "pnl: --reporting-ccy USD prints native exactly" "22\.00" pnl pnl --reporting-ccy USD --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: …and labels it as no-conversion" "Reporting: USD" pnl pnl --reporting-ccy USD --from 2026-07-01 --to 2026-07-31
 expect_ok "pnl: empty window is quiet, exit 0"  pnl pnl --from 2020-01-01 --to 2020-01-31
 expect_ok_match "pnl: empty window says so"  "nothing to report"  pnl pnl --from 2020-01-01 --to 2020-01-31
 # Horizon tokens are inclusive day-spans ending today (or --to).
@@ -431,9 +445,10 @@ expect_fail_match "pnl: bad date is a usage error"            2 "date"          
 expect_fail_match "pnl: unknown account errors (not 'all')"   1 "no account matches" pnl pnl --account NOPE
 expect_fail_match "pnl: positional argument refused"          2 "unexpected"     pnl pnl USD
 # No market data at all: a position that CROSSES the window boundary
-# cannot have its drift measured — realized still prints EXACT, the
-# position columns dash, the currency total is withheld, and the report
-# declares why. Never a quiet zero, never a disguised guess.
+# cannot have its drift measured, and USD cannot honestly be shown as
+# CAD — the reporting view DASHES both and declares why. A dash is a
+# fact; native values ride on in --json. Never a quiet zero, never a
+# disguised guess.
 PD2="$WORKDIR/pnl-store-nomkt"
 mkdir -p "$PD2/store" "$PD2/market"
 pnl2() { env DIT_BACKEND=file DIT_STORE_URL="$PD2/store" DIT_MARKET_URL="$PD2/market" "$DIT" "$@"; }
@@ -441,23 +456,23 @@ expect_ok "pnl2: same ledger, no market data" pnl2 account add --currency USD --
 expect_ok "pnl2: buy before window"          pnl2 tx buy --account "P&L One" --ticker WIDE --shares 10 --price 5 --date 2026-06-10
 expect_ok "pnl2: sell inside window"         pnl2 tx sell --account "P&L One" --ticker WIDE --shares 5 --price 8 --date 2026-07-10
 expect_ok "pnl2: dividend inside window"     pnl2 tx dividend --account "P&L One" --ticker WIDE --amount 7 --date 2026-07-20
-expect_ok_match "pnl2: realized still prints exactly" "22\.00"    pnl2 pnl --from 2026-07-01 --to 2026-07-31
-expect_ok_match "pnl2: …and the gap is declared" "no usable daily history|dashed" pnl2 pnl --from 2026-07-01 --to 2026-07-31
-expect_ok_match "pnl2: total withheld, not faked" "—"             pnl2 pnl --from 2026-07-01 --to 2026-07-31
-# FX combining stays honest: with a stored USD/CAD rate the combined
-# line appears WITH its rates quoted; without, it is withheld.
+expect_ok_match "pnl2: no FX history = no CAD figures, declared" "no stored FX history" pnl2 pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl2: total withheld, not faked" "Total \(CAD\): —"  pnl2 pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl2: USD reporting still prints 22.00 exactly" "22\.00" pnl2 pnl --reporting-ccy USD --from 2026-07-01 --to 2026-07-31
+# Mixed store: USD amounts inside a CAD account — every figure STILL
+# speaks CAD (the From column names each row's ledger currency).
 expect_ok "pnl: add a CAD account"           pnl account add --currency CAD --name "P&L Two"
-printf '%s\n' 'USD/CAD,2026-07-31,1.4' > "$WORKDIR/pnl-fx.csv"
-expect_ok_match "pnl: seed a stored FX rate"  "USD/CAD"           pnl market import "$WORKDIR/pnl-fx.csv"
 expect_ok "pnl: USD dividend in a CAD account (mixed view)" pnl tx dividend --account "P&L Two" --ticker SHOP.TO --amount 14 --currency USD --date 2026-07-21
-expect_ok_match "pnl: mixed view converts at quoted rates" "combined at stored rates: USD→CAD 1\.4" pnl pnl
-expect_ok_match "pnl: native rows stay unconverted" "CAD"         pnl pnl --from 2026-07-01 --to 2026-07-31
-expect_ok_match "pnl: explicit reporting ccy" "P&L currency: USD" pnl pnl --reporting-ccy USD
-# --json is a first-class contract here: nulls for unmeasurable,
-# exact fixed-scale decimals, provenance kept.
+expect_ok_match "pnl: mixed view speaks CAD only" "P&L \(CAD, portfolio" pnl pnl --to 2026-07-31
+expect_ok_match "pnl: mixed 51.00 USD converts to 71.40 CAD" "Total \(CAD\): 71\.40" pnl pnl --to 2026-07-31
+expect_ok_match "pnl: From column names the source currency" "USD" pnl pnl --to 2026-07-31
+# --json is a first-class contract here: native amounts stay, plus a
+# "reported" triple converted at the dated FX; nulls for the unknown.
 json_ok "pnl: json document parses"                           pnl --json pnl
 expect_ok_match "pnl: json keeps the split components" '"realized":"22\.00".*"total":"27\.00"' pnl --json pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: json adds the converted triple" '"reported":\{"positionChange":"7\.00","realized":"30\.80","total":"37\.80"\}' pnl --json pnl --from 2026-07-01 --to 2026-07-31
 expect_ok_match "pnl: json window + scope echo" '"fromLedgerStart":false' pnl --json pnl --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl: json quotes the dated FX used" '"rates":"USD→CAD 1\.4 at 2026-07-31"' pnl --json pnl --from 2026-07-01 --to 2026-07-31
 expect_ok_match "pnl: json marks derived basis (none here = observed)" '"basis":"observed"' pnl --json pnl
 expect_ok_match "pnl: json without market data nulls the change" '"positionChange":null' pnl2 --json pnl
 expect_fail_match "pnl: chart refuses pnl/1 honestly" 1 "no chart defined" bash -c "'$DIT' --json --store '$PD/store' --market-store '$PD/market' pnl | '$CHART'"
@@ -465,27 +480,30 @@ expect_fail_match "pnl: chart refuses pnl/1 honestly" 1 "no chart defined" bash 
 echo
 echo "-- 20. P&L time series (--time-series) — slices that must add back --"
 # Each period is computed by the SAME engine with its own baseline
-# (strictly before the period start), so contiguous periods telescope:
-# when every period is measurable, Σ periods MUST equal the window
-# total — the script asserts the identity, not just the shape.
+# (strictly before the period start) and converts at ITS OWN end-date
+# FX. Contiguous periods telescope in NATIVE amounts — the script
+# asserts that identity. With the flat fixture FX the converted column
+# adds exactly too (14.00 + 57.40 = 71.40 = window 51.00 × 1.40);
+# if FX ever moved between periods the footer says so, it does not
+# pretend the sum matched.
 expect_ok_match "ts: default shows a period table"      "P&L per period"      pnl pnl --time-series
 expect_ok_match "ts: granularity is always labelled"   "series: (monthly|weekly|daily) periods" pnl pnl --time-series
-expect_ok_match "ts: Σ slices match the window (default)" "Σ periods = window total \(exact" pnl pnl --time-series
-# Pinned two-month window: June drift +10 (buy at 5, mark 6.00),
-# July = realized 36 (sell 15 + WIDE div 7 + SHOP div 14) + drift 5
-# = 41; 10 + 41 = 51 = the whole window's total. Exact, and the
-# script checks that EXACTNESS.
-expect_ok_match "ts: June period carries its drift"     "2026-06.*10\.00"           pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
-expect_ok_match "ts: July period splits 36 + 5 = 41"   "2026-07.*36\.00.*5\.00.*41\.00" pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
-expect_ok_match "ts: monthly slices sum exactly to 51" "Σ periods = window total \(exact" pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
+expect_ok_match "ts: Σ slices match the window (default)" "Σ periods = window total \(exact" pnl pnl --time-series --to 2026-10-01
+# Pinned two-month window: June drift +10 (→ 14.00 CAD), July =
+# realized 36 (sell 15 + WIDE div 7 + SHOP div 14) + drift 5 = 41
+# (→ 57.40 CAD); 10 + 41 = 51 = the whole window's native total.
+expect_ok_match "ts: June period carries its converted drift"  "2026-06.*14\.00"  pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
+expect_ok_match "ts: July period splits 50.40 + 7.00 = 57.40" "2026-07.*50\.40.*7\.00.*57\.40" pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
+expect_ok_match "ts: monthly slices sum exactly to 71.40" "Σ periods = window total \(exact" pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
 expect_ok_match "ts: a one-month window goes weekly"  "series: weekly"  pnl pnl --time-series --from 2026-07-01 --to 2026-07-31
 expect_ok_match "ts: a short window goes daily"       "series: daily"   pnl pnl --time-series --from 2026-07-10 --to 2026-07-15
 # --daily FORCES daily periods on any window (marked forced) — and on
-# the pinned July window the daily slices still sum EXACTLY (10+7+14
-# +10 = 41, the July total): the identity is granularity-independent.
+# the pinned July window the daily slices still sum EXACTLY, in CAD:
+# the identity is granularity-independent (21.00−7.00+9.80+19.60+14.00
+# = 57.40 = the July total).
 expect_ok_match "ts: --daily forces day periods"       "series: daily periods \(forced\)" pnl pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
 expect_ok_match "ts: --daily slices still sum exact"  "Σ periods = window total \(exact" pnl pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
-expect_ok_match "ts: --daily shows the drift-only day" "2026-07-31.*10\.00" pnl pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
+expect_ok_match "ts: --daily shows the drift-only day (14.00 CAD)" "2026-07-31.*14\.00" pnl pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
 expect_fail_match "ts: --daily alone is a usage error" 2 "time-series"  pnl pnl --daily
 expect_ok "ts: --daily on a no-market store stays honest" pnl2 pnl --time-series --daily
 expect_ok_match "ts: …and refuses to sum it"           "Σ periods ≠ window total" pnl2 pnl --time-series --daily
@@ -498,12 +516,13 @@ expect_ok_match "ts2: unmeasurable is named as a gap" "NOT zero"                
 expect_ok_match "ts: --account keeps per-account scope" "P&L One"  pnl pnl --time-series --account "P&L One"
 expect_ok_match "ts: filter matching nothing stays quiet" "nothing to report|none with" pnl pnl --time-series --ccy GBP
 expect_ok "ts: --time-series=false = normal view"     pnl pnl --time-series=false
-expect_ok_match "ts: normal view came back"           "By currency"             pnl pnl --time-series=false
+expect_ok_match "ts: normal view came back"           "P&L \(CAD"             pnl pnl --time-series=false
 # --json: the series rides along under data.series, reconciles flag
-# included; nulls stay nulls.
+# included; nulls stay nulls; converted totals join per point.
 json_ok "ts: json document parses (series mode)"                 pnl --json pnl --time-series
 expect_ok_match "ts: json carries the series + its flags" '"granularity":"monthly"' pnl --json pnl --time-series --from 2026-06-01 --to 2026-07-31
 expect_ok_match "ts: json says the slices reconcile"    '"reconciles":true' pnl --json pnl --time-series --from 2026-06-01 --to 2026-07-31
+expect_ok_match "ts: json carries converted per-period totals" '"reportedTotal":"14.00"' pnl --json pnl --time-series --from 2026-06-01 --to 2026-07-31
 expect_ok_match "ts: json without market data refuses to sum" '"reconciles":false' pnl2 --json pnl --time-series
 expect_ok_match "ts: json reports forced daily"  '"granularity":"daily"' pnl --json pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
 

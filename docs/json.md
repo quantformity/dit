@@ -355,19 +355,24 @@ partially-known sum.
   "window":{"label":"custom","start":"2026-07-01","end":"2026-07-31","fromLedgerStart":false},
   "scope":{"accounts":"all","tickers":"all","currencies":"all","reportingCurrency":"CAD","perAccount":false},
   "positions":[{"symbol":"WIDE","kind":"position","accounts":["P&L One"],"currency":"USD",
-                "realized":"22.00","positionChange":"5.00","total":"27.00","basis":"observed"}],
-  "currencyTotals":[{"currency":"USD","realized":"36.00","positionChange":"5.00","total":"41.00","incompletePositions":0}],
-  "combined":{"currency":"CAD","value":"57.40"},
+                "realized":"22.00","positionChange":"5.00","total":"27.00","basis":"observed",
+                "reported":{"realized":"30.80","positionChange":"7.00","total":"37.80"}}],
+  "currencyTotals":[{"currency":"USD","realized":"36.00","positionChange":"5.00","total":"41.00",
+                     "incompletePositions":0,"reported":"57.40"}],
+  "combined":{"currency":"CAD","value":"57.40","at":"2026-07-31","rates":"USD→CAD 1.4 at 2026-07-31"},
   "activityCount":3,"notes":[]}}
 ```
 
-The same ledger with NO usable daily history — the gap stays visible:
+The same ledger with NO usable daily history — the gap stays visible
+(and with it, every CAD conversion, so `reported` is all-null):
 
 ```json
 {"ok":true,"schema":"pnl/1","data":{
   "positions":[{"symbol":"WIDE","kind":"position","accounts":["P&L One"],"currency":"USD",
-                "realized":"22.00","positionChange":null,"total":null,"basis":null}],
-  "currencyTotals":[{"currency":"USD","realized":"22.00","positionChange":null,"total":null,"incompletePositions":1}],
+                "realized":"22.00","positionChange":null,"total":null,"basis":null,
+                "reported":{"realized":null,"positionChange":null,"total":null}}],
+  "currencyTotals":[{"currency":"USD","realized":"22.00","positionChange":null,"total":null,
+                     "incompletePositions":1,"reported":null}],
   "combined":null,
   "notes":["no usable daily history for: WIDE — …"]}}
 ```
@@ -386,9 +391,17 @@ Contract details:
 - `currencyTotals` are **native and exact**: a total is `null` when
   any contributing position is incomplete, and incomplete positions
   are counted in `incompletePositions` (they drop out of the total).
+- `reported` (on rows, totals, and series points) is the SAME
+  numbers converted to the reporting currency at the DATED FX the
+  engine actually used. It appears only where a conversion is
+  involved (single-currency documents stay byte-identical) and is
+  `null` per part when that part could not be honestly converted —
+  never a latest-rate fallback. Read either view, never mix them:
+  native fields are ledger facts; `reported` is display arithmetic.
 - `combined` is the reporting-currency sum, `null` unless every
-  currency converted honestly. Rates are NOT embedded per row; the
-  text view quotes them.
+  currency converted honestly. `at` names the as-of date, `rates`
+  quotes the dated pair rates actually applied (`null` when nothing
+  was converted).
 - `scope`/`window` echo what was actually applied — filters never
   widen silently, and an empty result is `{"positions":[],
   "currencyTotals":[]}` with exit 0, not an error.
@@ -403,12 +416,16 @@ With `--time-series`, `data` additionally carries `"series"`:
   "collapsedEmpty":18,"collapsedUnmeasurable":0,
   "points":[{"label":"2026-07","start":"2026-07-01","end":"2026-07-31",
               "currencyTotals":[{"currency":"USD","realized":"36.00",
-                "positionChange":"5.00","total":"41.00","incompletePositions":0}]}]}
+                "positionChange":"5.00","total":"41.00","incompletePositions":0}],
+              "reportedTotal":"57.40"}]}
 ```
 
 - `points` are CONTIGUOUS slices of the window (empty periods are
   collapsed and counted in `collapsedEmpty`); the totals use the
-  same native-exact rules as `currencyTotals`.
+  same native-exact rules as `currencyTotals`. `reportedTotal`
+  (mixed-currency documents only) converts the WHOLE period at its
+  own end-date FX — `reconciles` stays a NATIVE-amount identity
+  because cross-currency sums are display, not arithmetic.
 - `reconciles` is the integrity flag: `true` means the slices sum to
   the window total (every period measurable); `false` means at least
   one gap lives in the series — do NOT sum the points into a total.

@@ -377,23 +377,32 @@ func helpText(for invocation: Invocation) -> String {
           positions; a filter that matches nothing reports "nothing",
           it never silently widens back to everything.
 
-          Money rules: every row is native currency; the combined
-          total appears only when every currency converts (stored
-          latest rates, triangulated via USD when no direct pair —
-          marked and labelled). --reporting-ccy picks the combining
-          currency (default: --display, CAD otherwise). Prices and
-          rates come from the market store only — this command never
-          fetches ('dit market history' fills it).
+          Money rules: text output speaks ONE currency — the
+          reporting currency (--reporting-ccy, default: --display,
+          CAD). Native amounts never mix in the table; when rows
+          carry a different recorded currency, a 'From' column names
+          it. Cross-currency figures convert at the FX close stored
+          ON/BEFORE the relevant date (direct pair, inverted twin,
+          or USD triangulation — composed rates are marked ~, never
+          smoothed). A stale (>1 week) or missing close means DASH:
+          today's rate is never projected backwards. --reporting-ccy
+          changes only this run's display — it never rewrites any
+          account's stored reporting currency. Exact native figures
+          (plus a converted 'reported' triple) stay in --json.
+          Prices and rates come from the market store only — this
+          command never fetches ('dit market history' fills it).
 
           --time-series slices the window into periods (auto: monthly
           above 8 weeks, weekly above 10 days, daily below — always
-          labelled) and prints one row per period and currency, each
-          computed with its own baseline close. --daily forces daily
-          periods at any window length (alone it is a usage error —
-          it only modifies --time-series). Contiguous periods
-          telescope: when every period is measurable the printout
-          says "Σ periods = window total (exact)"; gaps stay dashed
-          and the sum is refused, never faked. Combines with filters.
+          labelled) and prints one row per period, each computed with
+          its own baseline close and converted at ITS OWN end-date FX
+          — a June slice never wears July's rate. --daily forces
+          daily periods at any window length (alone it is a usage
+          error — it only modifies --time-series). Contiguous periods
+          telescope in native amounts: when every period is
+          measurable the printout says "Σ periods = window total
+          (exact)"; gaps stay dashed and the sum is refused, never
+          faked. Combines with filters.
 
           EXAMPLES
             dit pnl

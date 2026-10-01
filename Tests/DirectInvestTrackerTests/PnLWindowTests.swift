@@ -91,7 +91,7 @@ struct PnLWindowTests {
         let window = PnLReport.Window(start: day(2026, 1, 1), end: day(2026, 12, 31), label: "y")
         let report = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                        perAccount: false, symbols: nil, currencies: nil,
-                                       reportingCurrency: .usd, market: nil, rate: nil)
+                                       reportingCurrency: .usd, market: nil, fx: nil)
         let rows = report.rows.filter { !$0.isCashPnL }
         // Bought and sold inside the window: the position's market
         // history is irrelevant — its whole P&L is the booked +2100.
@@ -123,7 +123,7 @@ struct PnLWindowTests {
             PnLWindow.compute(portfolio: portfolio,
                               window: PnLReport.Window(start: from, end: to, label: "t"),
                               accounts: [acct], perAccount: false, symbols: nil, currencies: nil,
-                              reportingCurrency: .usd, market: nil, rate: nil)
+                              reportingCurrency: .usd, market: nil, fx: nil)
         }
         let first = report(day(2026, 1, 1), day(2026, 6, 30))
         let second = report(day(2026, 7, 1), day(2026, 12, 31))
@@ -157,7 +157,7 @@ struct PnLWindowTests {
         let window = PnLReport.Window(start: day(2026, 7, 1), end: day(2026, 7, 31), label: "test")
         let report = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                        perAccount: false, symbols: nil, currencies: nil,
-                                       reportingCurrency: .usd, market: market, rate: nil)
+                                       reportingCurrency: .usd, market: market, fx: nil)
         #expect(report.rows.count == 1)
         let row = report.rows[0]
         #expect(row.realized == dec("250"))
@@ -182,7 +182,7 @@ struct PnLWindowTests {
                                                              (day(2026, 7, 31), "65.00")])])
         let priced = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                        perAccount: false, symbols: nil, currencies: nil,
-                                       reportingCurrency: .usd, market: withPrices, rate: nil)
+                                       reportingCurrency: .usd, market: withPrices, fx: nil)
         #expect(priced.rows.count == 1)
         #expect(priced.rows[0].positionChange == dec("500"))
         #expect(priced.rows[0].total == dec("500"))
@@ -191,7 +191,7 @@ struct PnLWindowTests {
         // row, but the symbol is declared in the notes.
         let bare = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                      perAccount: false, symbols: nil, currencies: nil,
-                                     reportingCurrency: .usd, market: nil, rate: nil)
+                                     reportingCurrency: .usd, market: nil, fx: nil)
         #expect(bare.rows.isEmpty)
         #expect(bare.notes.contains { $0.contains("AAPL") && $0.contains("history") })
     }
@@ -211,7 +211,7 @@ struct PnLWindowTests {
         let window = PnLReport.Window(start: day(2026, 7, 1), end: day(2026, 7, 31), label: "test")
         let report = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                        perAccount: false, symbols: nil, currencies: nil,
-                                       reportingCurrency: .cad, market: market, rate: nil)
+                                       reportingCurrency: .cad, market: market, fx: nil)
         // The held position cannot be valued → nothing reported, and
         // the report says SHOP was unmeasurable.
         #expect(report.rows.isEmpty)
@@ -236,7 +236,7 @@ struct PnLWindowTests {
         let window = PnLReport.Window(start: day(2026, 7, 1), end: day(2026, 9, 30), label: "test")
         let report = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                        perAccount: false, symbols: nil, currencies: nil,
-                                       reportingCurrency: .cad, market: nil, rate: nil)
+                                       reportingCurrency: .cad, market: nil, fx: nil)
         #expect(report.rows.count == 1)
         let row = report.rows[0]
         #expect(row.isCashPnL)
@@ -261,7 +261,7 @@ struct PnLWindowTests {
         let window = PnLReport.Window(start: day(2026, 7, 1), end: day(2026, 7, 31), label: "test")
         let report = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                        perAccount: true, symbols: nil, currencies: nil,
-                                       reportingCurrency: .usd, market: nil, rate: nil)
+                                       reportingCurrency: .usd, market: nil, fx: nil)
         #expect(report.untrackedShorts.count == 1)
         #expect(report.untrackedShorts[0].shares == dec("50"))
         #expect(report.notes.contains { $0.contains("untracked short") })
@@ -285,21 +285,36 @@ struct PnLWindowTests {
             "AAPL": series("AAPL", .usd, [(day(2026, 6, 30), "60.00"), (day(2026, 7, 31), "63.00")]),
         ])
 
-        let usdCad = ExchangeRate(base: .usd, quote: .cad, rate: dec("1.40"))
+        // Dated FX: a USD/CAD close ON the window's as-of date.
+        let clock = FXClock(series: ["USD/CAD":
+            series("USD/CAD", .cad, [(day(2026, 7, 31), "1.40")])])
         let withRates = PnLWindow.compute(portfolio: portfolio, window: window,
                                           accounts: [cadAcct, usdAcct], perAccount: false,
                                           symbols: nil, currencies: nil, reportingCurrency: .cad,
-                                          market: market,
-                                          rate: { from, to in usdCad.rate(from: from, to: to) })
+                                          market: market, fx: clock)
         // CAD drift +200; USD drift +300 × 1.40 = 420 → 620 combined.
         #expect(withRates.combinedTotal == dec("620"))
+        #expect(withRates.fxRates[.usd]?.stalenessDays == 0)
+        #expect(withRates.fxRates[.usd].map { !$0.approx } == true)
 
+        // A 21-day-old FX close is not "July's FX" either — refused,
+        // not stretched.
+        let staleClock = FXClock(series: ["USD/CAD":
+            series("USD/CAD", .cad, [(day(2026, 7, 10), "1.40")])])
+        let stale = PnLWindow.compute(portfolio: portfolio, window: window,
+                                      accounts: [cadAcct, usdAcct], perAccount: false,
+                                      symbols: nil, currencies: nil, reportingCurrency: .cad,
+                                      market: market, fx: staleClock)
+        #expect(stale.combinedTotal == nil)
+        #expect(stale.unconvertedCurrencies == [.usd])
+
+        // The latest-snapshot rate is NOT history: with no pair series
+        // the combined number is withheld, per-currency totals stay
+        // native and exact.
         let noRates = PnLWindow.compute(portfolio: portfolio, window: window,
                                         accounts: [cadAcct, usdAcct], perAccount: false,
                                         symbols: nil, currencies: nil, reportingCurrency: .cad,
-                                        market: MarketData(series: market.series), rate: nil)
-        // No rates → the combined number is withheld, per-currency
-        // totals stay native and exact.
+                                        market: MarketData(series: market.series), fx: nil)
         #expect(noRates.combinedTotal == nil)
         #expect(noRates.unconvertedCurrencies == [.usd])
     }
@@ -320,16 +335,16 @@ struct PnLWindowTests {
         let window = PnLReport.Window(start: day(2026, 7, 1), end: day(2026, 7, 31), label: "test")
         let tickers = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                         perAccount: false, symbols: ["AAPL"], currencies: nil,
-                                        reportingCurrency: .usd, market: nil, rate: nil)
+                                        reportingCurrency: .usd, market: nil, fx: nil)
         #expect(tickers.rows.map(\.symbol) == ["AAPL"])
         let ccys = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                      perAccount: false, symbols: nil, currencies: [.cad],
-                                     reportingCurrency: .usd, market: nil, rate: nil)
+                                     reportingCurrency: .usd, market: nil, fx: nil)
         #expect(ccys.rows.map(\.symbol) == ["SHOP.TO"])
         // A filter that matches nothing is nothing, never a widening.
         let none = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                      perAccount: false, symbols: ["NVDA"], currencies: nil,
-                                     reportingCurrency: .usd, market: nil, rate: nil)
+                                     reportingCurrency: .usd, market: nil, fx: nil)
         #expect(none.rows.isEmpty)
     }
 
@@ -392,12 +407,12 @@ struct PnLWindowTests {
         let window = PnLReport.Window(start: day(2026, 6, 1), end: day(2026, 7, 31), label: "t")
         let full = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                      perAccount: false, symbols: nil, currencies: nil,
-                                     reportingCurrency: .usd, market: market, rate: nil)
+                                     reportingCurrency: .usd, market: market, fx: nil)
         let seriesResult = PnLWindow.computeSeries(portfolio: portfolio, window: window,
                                                    granularity: .monthly, accounts: [acct],
                                                    perAccount: false, symbols: nil, currencies: nil,
                                                    reportingCurrency: .usd, market: market,
-                                                   rate: nil, fullReport: full)
+                                                   fx: nil, fullReport: full)
         #expect(seriesResult.granularity == .monthly)
         #expect(seriesResult.points.count == 2)
         let june = seriesResult.points[0]
@@ -424,12 +439,12 @@ struct PnLWindowTests {
         let window = PnLReport.Window(start: day(2026, 6, 1), end: day(2026, 9, 30), label: "t")
         let full = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                      perAccount: false, symbols: nil, currencies: nil,
-                                     reportingCurrency: .usd, market: market, rate: nil)
+                                     reportingCurrency: .usd, market: market, fx: nil)
         let seriesResult = PnLWindow.computeSeries(portfolio: portfolio, window: window,
                                                    granularity: .monthly, accounts: [acct],
                                                    perAccount: false, symbols: nil, currencies: nil,
                                                    reportingCurrency: .usd, market: market,
-                                                   rate: nil, fullReport: full)
+                                                   fx: nil, fullReport: full)
         #expect(seriesResult.collapsedEmpty == 2) // Aug, Sep: measured zero drift
         #expect(seriesResult.collapsedUnmeasurable == 0)
         #expect(seriesResult.reconciles)
@@ -444,12 +459,12 @@ struct PnLWindowTests {
         let window = PnLReport.Window(start: day(2026, 6, 1), end: day(2026, 8, 31), label: "t")
         let full = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                      perAccount: false, symbols: nil, currencies: nil,
-                                     reportingCurrency: .usd, market: nil, rate: nil)
+                                     reportingCurrency: .usd, market: nil, fx: nil)
         let seriesResult = PnLWindow.computeSeries(portfolio: portfolio, window: window,
                                                    granularity: .monthly, accounts: [acct],
                                                    perAccount: false, symbols: nil, currencies: nil,
                                                    reportingCurrency: .usd, market: nil,
-                                                   rate: nil, fullReport: full)
+                                                   fx: nil, fullReport: full)
         #expect(seriesResult.points.count == 1)          // only July (booked facts)
         #expect(seriesResult.points[0].report.perCurrency.first?.total == nil) // dashed
         #expect(seriesResult.collapsedUnmeasurable == 2) // June and August
@@ -463,12 +478,12 @@ struct PnLWindowTests {
             let window = PnLReport.Window(start: day(2026, 6, 1), end: day(2026, 7, 31), label: "t")
             let full = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
                                          perAccount: false, symbols: nil, currencies: nil,
-                                         reportingCurrency: .usd, market: market, rate: nil)
+                                         reportingCurrency: .usd, market: market, fx: nil)
             let seriesResult = PnLWindow.computeSeries(portfolio: portfolio, window: window,
                                                        granularity: .daily, accounts: [acct],
                                                        perAccount: false, symbols: nil,
                                                        currencies: nil, reportingCurrency: .usd,
-                                                       market: market, rate: nil,
+                                                       market: market, fx: nil,
                                                        fullReport: full)
             return (seriesResult, full)
         }

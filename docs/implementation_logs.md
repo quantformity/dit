@@ -560,3 +560,51 @@ and the user decides.
   exactly (27.00 == window total, unit-tested); the real store's
   sparse history correctly REFUSES the sum and names its 2
   unmeasurable gaps. 269/269 e2e (8 daily checks), 164 unit tests.
+
+## Entry 14 — 2026-10-01 — one reporting currency; FX as a CLOCK, not a snapshot
+
+`dit pnl` now speaks ONE currency in text (reporting currency —
+`--reporting-ccy`, default `--display`, else CAD). The native
+per-currency table is gone from text (it stays byte-exact in
+`--json`); rows carry a `From` column naming each ledger currency.
+`--reporting-ccy` is a runtime display choice only — it never
+rewrites a stored account/portfolio reporting currency.
+
+The conversion is HISTORICAL, and this was the design line: the
+latest-snapshot rate is deliberately NOT a source anymore. A new
+`FXClock` (Sources/DirectInvestTracker/FXHistory.swift) reads dated
+FX pair series only — the last close on/before the date a figure
+belongs to (window end for the plain view; each period's own end for
+`--time-series` — "a June slice never wears July's rate"). Legal
+paths: direct pair, inverted twin (reciprocal, labelled), USD-hub
+triangulation (marked derived). Closes older than a week are
+REFUSED, not stretched; missing means DASH. Today's rate was used
+for June's P&L before this change — that counted as a mixed view;
+it is now recognised as a disguised guess and is gone.
+
+Markers: `*` derived price history (unchanged), `~` FX from an
+earlier/derived rate — legends always print; the real store's 2025
+series shows it (May/Nov month-ends backdate to a Friday).
+
+Time-series honesty chain updated: the telescoping identity stays a
+NATIVE check (cross-currency sums are display, not arithmetic), so
+the footer distinguishes three facts — "Σ = window (exact, same FX
+throughout)", "Σ ≠ window in CAD — FX TIMING; native slices still
+add exactly", and the GAPS refusal. The flat-rate e2e fixture proves
+the first (converted 14.00 + 57.40 = 71.40 = 51.00 × 1.40); the
+real store exercises the second (USD→CAD drifted 1.44→1.37 across
+2025).
+
+JSON stays additive: native fields untouched; rows/totals gain
+`reported` triples converted at the dated FX (only where conversion
+is involved), series points gain `reportedTotal`, `combined` gains
+`at` + `rates` (real example: "USD→CAD 1.4247 at 2026-10-01").
+Real-store cross-check: default total prints 409,500.13 CAD — the
+honest single-currency answer to the user's 409,527.13 mixed-units
+sheet sum; `--reporting-ccy USD` correctly converts CAD rows via
+the inverted USD/CAD series ("0.7137 … 1d earlier, inverted").
+
+Tests: FXHistory suite (7), conversion test now pins staleness
+refusal, e2e §19/§20 reseeded with a dense flat USD/CAD history
+(default-window checks pinned to --to 2026-10-01 so script runs
+stay date-proof). 275/275 e2e; 171 swift-testing + 112 XCTest.

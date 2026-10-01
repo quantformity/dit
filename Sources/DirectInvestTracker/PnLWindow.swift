@@ -39,6 +39,9 @@ public struct PnLRow: Sendable {
     public let isCashPnL: Bool
     /// Every account the line touches (joined in aggregate mode).
     public let accountNames: [String]
+    /// The currency the ledger amounts are RECORDED in. Display is
+    /// converted to the reporting currency; these fields stay native
+    /// (JSON keeps them; the renderer shows converted values only).
     public let currency: Currency
     /// Booked income inside the window (exact ledger fact).
     public let realized: Decimal
@@ -121,11 +124,15 @@ public struct PnLReport: Sendable {
     public let rows: [PnLRow]
     public let perCurrency: [CurrencyPnL]
     public let reportingCurrency: Currency
-    /// Σ per-currency totals converted at stored latest rates; `nil`
-    /// when any currency is unconvertible OR any total is incomplete.
+    /// Σ per-currency totals converted at the FX close on/before the
+    /// window's as-of date; `nil` when any currency is unconvertible
+    /// OR any total is incomplete. This is the reporting-currency
+    /// answer — the per-currency entries above stay native.
     public let combinedTotal: Decimal?
-    /// Rates actually used for the combined total (for labelling).
-    public let conversionUsed: [(from: Currency, to: Currency, rate: Decimal)]
+    /// The dated FX actually used, per source currency (for
+    /// labelling). A converted number without a rate behind it is
+    /// never shown.
+    public let fxRates: [Currency: FXQuote]
     /// Currencies whose total could NOT be combined (missing rate).
     public let unconvertedCurrencies: [Currency]
     /// Currency totals withheld because of missing price data.
@@ -145,7 +152,7 @@ public struct PnLReport: Sendable {
 
     public init(window: Window, perAccount: Bool, rows: [PnLRow], perCurrency: [CurrencyPnL],
                 reportingCurrency: Currency, combinedTotal: Decimal?,
-                conversionUsed: [(from: Currency, to: Currency, rate: Decimal)],
+                fxRates: [Currency: FXQuote] = [:],
                 unconvertedCurrencies: [Currency] = [], incompleteCurrencies: [Currency] = [],
                 untrackedShorts: [(accountName: String, symbol: String, currency: Currency, shares: Decimal)] = [],
                 notes: [String] = [], activityCount: Int = 0) {
@@ -155,7 +162,7 @@ public struct PnLReport: Sendable {
         self.perCurrency = perCurrency
         self.reportingCurrency = reportingCurrency
         self.combinedTotal = combinedTotal
-        self.conversionUsed = conversionUsed
+        self.fxRates = fxRates
         self.unconvertedCurrencies = unconvertedCurrencies
         self.incompleteCurrencies = incompleteCurrencies
         self.untrackedShorts = untrackedShorts
@@ -376,11 +383,15 @@ public enum PnLWindow {
     ///   - symbols: optional ticker whitelist (normalized, uppercase).
     ///   - currencies: optional currency whitelist (rows outside are
     ///     dropped entirely — filter, not display option).
-    ///   - reportingCurrency: currency for the combined total.
-    ///   - market: stored daily closes + latest rates (`nil` = no
-    ///     market data: the report degrades to realized-only).
-    ///   - rate: converter `rate(from, to)` for the combined total
-    ///     (`nil` = never convert, per-currency totals stay native).
+    ///   - reportingCurrency: currency every figure is DISPLAYED in
+    ///     (runtime choice — the ledger stays native).
+    ///   - market: stored daily closes (`nil` = no market data: the
+    ///     report degrades to realized-only, all conversions dashed).
+    ///   - fx: date-aware FX clock over stored pair series. Cross-
+    ///     currency figures convert at the close on/before the
+    ///     window's as-of date; without a usable close the number
+    ///     dashes — the latest snapshot rate is NOT a fallback
+    ///     (today's FX is not last June's FX).
     public static func compute(portfolio: Portfolio,
                                window: PnLReport.Window,
                                accounts: [Account],
@@ -389,7 +400,7 @@ public enum PnLWindow {
                                currencies: Set<Currency>?,
                                reportingCurrency: Currency,
                                market: MarketData?,
-                               rate: FXRate?) -> PnLReport {
+                               fx: FXClock?) -> PnLReport {
         var notes: [String] = []
         var shortFlags: [(accountName: String, symbol: String, currency: Currency, shares: Decimal)] = []
         var raw: [Raw] = []
@@ -572,26 +583,37 @@ public enum PnLWindow {
                         incompletePositions: entry.incomplete)
         }.sorted { $0.currency.rawValue < $1.currency.rawValue }
 
-        // MARK: combined total in the reporting currency
+        // MARK: reporting-currency conversion (as-of the window end)
+        // Every non-native currency converts at the FX close stored
+        // on/before the window's as-of date. A currency without such
+        // a close is NOT converted at any rate — no latest-rate
+        // fallback, no invented history. The per-currency entries
+        // stay native (JSON + the telescoping check); combinedTotal
+        // is the reporting-currency sum, whole or nothing.
+        var fxRates: [Currency: FXQuote] = [:]
         var combined: Decimal? = 0
-        var used: [(from: Currency, to: Currency, rate: Decimal)] = []
         var unconverted: [Currency] = []
         var withheld: [Currency] = []
         for total in perCurrency {
+            if total.currency != reportingCurrency {
+                if let fx, let quote = fx.quote(from: total.currency, to: reportingCurrency,
+                                                on: window.end) {
+                    fxRates[total.currency] = quote
+                } else {
+                    unconverted.append(total.currency)
+                }
+            }
             guard let amount = total.total else {
                 withheld.append(total.currency)
                 combined = nil
                 continue
             }
             if total.currency == reportingCurrency { combined = (combined ?? 0) + amount; continue }
-            guard let rate, let value = rate(total.currency, reportingCurrency) else {
-                withheld.append(total.currency)
-                unconverted.append(total.currency)
+            guard let quote = fxRates[total.currency] else {
                 combined = nil
                 continue
             }
-            combined = (combined ?? 0) + amount * value
-            used.append((total.currency, reportingCurrency, value))
+            combined = (combined ?? 0) + amount * quote.rate
         }
 
         // MARK: notes (label what the numbers cannot say)
@@ -614,13 +636,25 @@ public enum PnLWindow {
                 + " totals for its window are incomplete"
         })
         if !unconverted.isEmpty {
-            notes.append("not converted: no stored rate for "
+            notes.append("no stored FX history for "
                 + unconverted.map { "\($0.rawValue)→\(reportingCurrency.rawValue)" }.joined(separator: ", ")
-                + " — combined total withheld, per-currency totals stay exact")
+                + " on or before \(TextFormat.day(window.end)) — those amounts are dashed in the"
+                + " reporting view, never converted at a guessed rate (native figures stay in --json;"
+                + " fill FX history with 'dit market history --all' or 'dit market import')")
+        }
+        let dated = fxRates.sorted { $0.key.rawValue < $1.key.rawValue }.map { ccy, quote in
+            "\(ccy.rawValue)→\(reportingCurrency.rawValue) \(TextFormat.quantity(quote.rate))"
+                + " (close of \(TextFormat.day(quote.asOf))"
+                + (quote.stalenessDays > 0 ? ", \(quote.stalenessDays)d earlier" : "")
+                + (quote.via != nil ? ", \(quote.via!)" : "") + ")"
+        }
+        if !dated.isEmpty {
+            notes.append("converted at the stored FX close on/before \(TextFormat.day(window.end)):"
+                + " " + dated.joined(separator: "; "))
         }
         return PnLReport(window: window, perAccount: perAccount, rows: rows,
                          perCurrency: perCurrency, reportingCurrency: reportingCurrency,
-                         combinedTotal: combined, conversionUsed: used,
+                         combinedTotal: combined, fxRates: fxRates,
                          unconvertedCurrencies: unconverted, incompleteCurrencies: withheld,
                          untrackedShorts: shortFlags, notes: notes, activityCount: activity)
     }
@@ -706,10 +740,13 @@ public enum PnLWindow {
     }
 
     /// Compute the per-period series for `window`. Every bucket is one
-    /// ``compute`` call (same filters, same rate closure, same market),
+    /// ``compute`` call (same filters, same FX clock, same market),
     /// so the series is the window report sliced — not a second
-    /// financial model. `fullReport` (the whole window) is used ONLY
-    /// to check the telescoping identity and set `reconciles`.
+    /// financial model. Each period converts at ITS OWN end-date FX,
+    /// which is why the telescoping identity is checked in native
+    /// amounts (cross-currency sums are display arithmetic). `fullReport`
+    /// (the whole window) is used ONLY to check the telescoping
+    /// identity and set `reconciles`.
     public static func computeSeries(portfolio: Portfolio,
                                      window: PnLReport.Window,
                                      granularity: SeriesGranularity,
@@ -719,7 +756,7 @@ public enum PnLWindow {
                                      currencies: Set<Currency>?,
                                      reportingCurrency: Currency,
                                      market: MarketData?,
-                                     rate: FXRate?,
+                                     fx: FXClock?,
                                      fullReport: PnLReport) -> PnLSeries {
         var points: [PnLSeriesPoint] = []
         var collapsedEmpty = 0
@@ -732,7 +769,7 @@ public enum PnLWindow {
                                  accounts: accounts, perAccount: perAccount,
                                  symbols: symbols, currencies: currencies,
                                  reportingCurrency: reportingCurrency,
-                                 market: market, rate: rate)
+                                 market: market, fx: fx)
             if report.rows.isEmpty {
                 // A period WITHOUT price data is an unmeasurable gap,
                 // not a quiet period — count it separately so the

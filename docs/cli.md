@@ -414,26 +414,49 @@ Honesty rules the report will not break:
   from currency totals, and a footnote names the symbols and how to
   fill the gap (`dit market history --all`). A total with a missing
   half is worse than a dash.
-- Per-currency rows stay **native and exact**; a combined
-  `Total (P&L currency …)` line appears only when every currency
-  total is complete and every needed rate is stored — and it quotes
-  the actual rate used (`combined at stored rates: USD→CAD 1.4`).
-  Otherwise it is withheld, not guessed. FX pair series count as
-  stored rates.
+- Text output speaks **one currency — the reporting currency**
+  (`--reporting-ccy`, default: `--display`, else CAD). There are no
+  native per-currency tables: a USD amount is shown as CAD, or it is
+  dashed. The `From` column names each row's recorded currency.
+- Conversion is HISTORICAL: each figure converts at the FX close
+  stored on or before the date it belongs to (the window end for
+  the plain view; each period's own end for `--time-series`). Direct
+  pair, inverted twin, or USD triangulation are all legal sources —
+  composed or older-than-the-day rates are marked `~` and quoted
+  with the real date (`Total (CAD): … [converted at USD→CAD 1.4
+  (2026-07-31)]`). No stored close for the date — or one more than
+  a week old — means DASH: today's rate is never projected
+  backwards, and the Total line refuses rather than mixing a CAD
+  guess with USD facts. Fill history with `dit market history --all`
+  or `dit market import` (FX pair lines like `USD/CAD,2026-07-31,
+  1.40` count — pair series ARE dated rates).
+- The combined `Total (CAD)` appears only when every currency is
+  complete AND convertible; otherwise `— (not combinable)`. Native
+  amounts are never lost: `--json` keeps them exactly (plus a
+  `reported` triple converted at the dated FX).
+- `--reporting-ccy` is RUNTIME ONLY — it decides how this report is
+  displayed and never rewrites what the ledger stores. No conversion
+  happens at all when the portfolio already sits in the reporting
+  currency (header says `as recorded — no conversion needed`).
 - Position series explicitly stored in a *different* currency than
   the holding are never used (different instrument, not a conversion).
 
 **`--time-series` — the window sliced into periods.** One row per
-period and currency, each period computed by the same engine with its
-own baseline close (strictly before the period start). Period size is
+period in the reporting currency, each period computed by the same
+engine with its own baseline close (strictly before the period start)
+and converted at ITS OWN end-date FX — a June slice never wears
+July's rate. Period size is
 AUTO — monthly above 8 weeks, weekly above 10 days, daily below — and
 always named in the header (`series: monthly periods`); `--daily`
 forces daily periods at any length (marked `(forced)`), and alone it
 is a usage error — it only modifies `--time-series`. Because the
-slices are contiguous, they telescope: when every period is
-measurable the footer says `Σ periods = window total (exact)`; if any
-period lacks a price pair the sum is refused (`Σ ≠ … GAPS, not
-zeros`) — a sliced report can never quietly disagree with the whole.
+slices are contiguous, they telescope in NATIVE amounts: when every
+period is measurable the footer says `Σ periods = window total
+(exact)`; if any period lacks a price pair the sum is refused
+(`Σ ≠ … GAPS, not zeros`) — a sliced report can never quietly
+disagree with the whole. A converted-Σ that differs from the window
+total is FX TIMING (each period used its own close), and the footer
+says exactly that instead of pretending.
 Truly quiet periods (nothing booked, measured zero drift) collapse
 into a counted note; periods with UNMEASURABLE drift are counted
 separately — "nothing happened" and "nothing is knowable" are
