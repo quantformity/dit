@@ -1,4 +1,4 @@
-# DirectInvestTracker — Design & Phase Plan
+# dit — Design & Phase Plan
 
 Status marker: `✅ done · 🔨 implemented, hardening in progress · ⏭ planned`.
 Implementation history lives in `docs/implementation_logs.md`.
@@ -33,7 +33,7 @@ on demand, never trusted blindly.
    Currency is a curated enum (10 + `.unknown`); display defaults to CAD
    with a USD hub for cross-currency routing.
 6. **Thin CLI, fat library.** The executable parses arguments and prints;
-   every rule lives in the `DirectInvestTracker` library, under tests.
+   every rule lives in the `DitCore` library, under tests.
    No SPM dependencies (stdlib + system libsqlite3 only).
 7. **Explicit over magic.** Flags beat env vars beat defaults; a wrong
    flag is a usage error, never ignored; `--rate` is always a percentage
@@ -55,7 +55,7 @@ Sources/dit/
   CommandsStore.swift           store path/export/backup/import
   Helpers.swift                 shared CLI rules: account resolution with
                                 did-you-mean, store opening, scalar parsing
-Sources/DirectInvestTracker/
+Sources/DitCore/
   Currency, Tag                 foundation values
   EquityTicker                  symbol-as-identity registry (name, currency, tags)
   Account                       account header (reporting currency, taxable, dates)
@@ -90,7 +90,9 @@ Sources/DirectInvestTracker/
 
 - Exit codes: `0` success · `1` runtime error (unknown id, lookup failure)
   · `2` usage error (prints usage).
-- Store: default `~/Library/Application Support/DirectInvestTracker`;
+- Store: default `~/Library/Application Support/dit` (a pre-rename
+  `…/DirectInvestTracker` folder is still read when `dit` does not
+  exist);
   `--store`/`DIT_STORE_URL` + `--backend`/`DIT_BACKEND` (file | sqlite).
 - Multi-currency cash: an account has a **cash pool per currency**; an fx
   conversion touches two pools; totals that cannot be converted display

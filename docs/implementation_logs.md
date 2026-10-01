@@ -663,3 +663,24 @@ tests (MarketCoverageTests), e2e §21 (a fixture carrying one
 instance of every fact class — dense, inside-hole, dead series,
 missing series, triangulated chain, no-path chain). Counts: 182
 swift-testing + 112 XCTest, 324/324 e2e.
+
+## Entry 16 — 2026-10-01 — the project becomes `dit`
+
+Renamed everything that carried the old name: package `DirectInvestTracker`
+→ `dit`, library module → `DitCore` (Sources/DitCore/, Tests/DitCoreTests/),
+workspace folder `DirectInvestTracker2` → `dit`. The CLI never had a long
+name — the binary, docs, and now the package all agree on `dit`.
+
+The default store path moved to `~/Library/Application Support/dit`, but
+READ-ONLY COMPATIBILITY was the hard requirement: when `dit` does not exist
+and a pre-rename `…/DirectInvestTracker` folder does, the factory resolves
+to the legacy folder instead (when both exist, `dit` wins). No data was
+moved or copied — existing stores keep working, verified by running the
+real live store through the new binary. `import-investments.sh` mirrors
+the same resolution so it stays usable against older builds.
+
+Tests: the old default-path assertion (which pinned the literal old name)
+became a pure, injectable resolver + three cases (fresh → dit, legacy-only
+→ legacy, both → dit); machine-state-dependent checks now derive their
+expectation from the same resolver, so they pass on machines with either
+layout. 182 swift-testing + 113 XCTest, 324/324 e2e.

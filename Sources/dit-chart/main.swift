@@ -1,5 +1,5 @@
 import Foundation
-import DirectInvestTracker
+import DitCore
 
 // dit-chart — ASCII bar charts from machine documents (a pipe tool).
 //

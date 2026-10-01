@@ -1,6 +1,6 @@
 # dit — command reference
 
-`dit` (DirectInvestTracker) is a CLI for tracking a personal portfolio —
+`dit` is a CLI for tracking a personal portfolio —
 brokerage accounts, bank accounts, multi-currency cash and holdings,
 equities, dividends, GICs, and FX conversions. **Transactions are the
 source of truth**: everything you see (balances, holdings, P&L) is
@@ -19,13 +19,15 @@ priority:
 |---|---|---|
 | 1 | Flags (any command) | `dit --backend sqlite --store ~/Store/ dit.sqlite` |
 | 2 | Environment | `DIT_BACKEND=file DIT_STORE_URL=~/Store/dit` |
-| 3 | Default | `file` backend at `~/Library/Application Support/DirectInvestTracker` |
+| 3 | Default | `file` backend at `~/Library/Application Support/dit` (or the legacy `…/DirectInvestTracker` folder when only that exists) |
 
 Useful environment variables:
 
 - `DIT_BACKEND` — `file` (default) or `sqlite`.
 - `DIT_STORE_URL` — the store file (sqlite db) or directory (file
-  backend) to use. Default: `~/Library/Application Support/DirectInvestTracker`.
+  backend) to use. Default: `~/Library/Application Support/dit`
+  (`…/DirectInvestTracker` is still honored when it exists and `dit`
+  does not).
 
 Supported display currencies: `CAD` (default), `USD`, `GBP`, `CHF`,
 `EUR`, `JPY`, `AUD`, `NZD`, `CNY`, `HKD` (case-insensitive; anything

@@ -38,7 +38,16 @@
 # TARGET STORE — change if you don't want to import into the default store:
 #   DIT_STORE_URL="$HOME/scratch/dit-import" bash scripts/import-investments.sh
 #   (that's exactly how this script was verified green before shipping)
-export DIT_STORE_URL="${DIT_STORE_URL:-$HOME/Library/Application Support/DirectInvestTracker}"
+# Default store: `…/Application Support/dit`, falling back to the
+# pre-rename `…/DirectInvestTracker` folder — mirroring what dit itself
+# resolves, because this script may run against older dit builds.
+if [ -z "${DIT_STORE_URL:-}" ]; then
+  if [ -d "$HOME/Library/Application Support/dit" ]; then
+    export DIT_STORE_URL="$HOME/Library/Application Support/dit"
+  else
+    export DIT_STORE_URL="$HOME/Library/Application Support/DirectInvestTracker"
+  fi
+fi
 DIT="${DIT:-dit}"
 #
 # NOT IDEMPOTENT: account/ticker names already in the target store make the

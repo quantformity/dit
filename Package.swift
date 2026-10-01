@@ -2,25 +2,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "DirectInvestTracker",
+    name: "dit",
     products: [
-        .library(name: "DirectInvestTracker", targets: ["DirectInvestTracker"]),
         .executable(name: "dit", targets: ["dit"]),
         .executable(name: "dit-chart", targets: ["dit-chart"])
     ],
     targets: [
-        .target(name: "DirectInvestTracker"),
+        .target(name: "DitCore"),
         .executableTarget(
             name: "dit",
-            dependencies: ["DirectInvestTracker"]
+            dependencies: ["DitCore"]
         ),
         .executableTarget(
             name: "dit-chart",
-            dependencies: ["DirectInvestTracker"]
+            dependencies: ["DitCore"]
         ),
         .testTarget(
-            name: "DirectInvestTrackerTests",
-            dependencies: ["DirectInvestTracker"]
+            name: "DitCoreTests",
+            dependencies: ["DitCore"]
         )
     ]
 )

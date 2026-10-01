@@ -1,10 +1,10 @@
-import DirectInvestTracker
+import DitCore
 import Foundation
 #if canImport(Darwin)
     import Darwin
 #endif
 
-/// dit — the command line for DirectInvestTracker.
+/// dit — the investment-tracking command line (all rules live in DitCore).
 ///
 /// A thin shell: parse arguments → load → mutate or derive → save →
 /// render. Every rule with financial meaning (derivation, mutation

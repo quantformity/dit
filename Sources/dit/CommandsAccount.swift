@@ -1,4 +1,4 @@
-import DirectInvestTracker
+import DitCore
 import Foundation
 #if canImport(Darwin)
     import Darwin

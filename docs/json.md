@@ -7,7 +7,7 @@ that would be `—` or "unknown" for a human becomes `null`; nothing is
 ever invented to fill a field.
 
 This file is the contract. Its executable counterparts are
-`Tests/DirectInvestTrackerTests/JSONOutputTests.swift` and the
+`Tests/DitCoreTests/JSONOutputTests.swift` and the
 "Machine output" section of `scripts/scenario-e2e.sh`: if a schema
 changes, those change with it and the version bumps — never silently.
 
