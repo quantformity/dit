@@ -389,6 +389,7 @@ dit pnl --from DATE [--to DATE]             # explicit window (both ends inclusi
 dit pnl --to DATE                           # ledger start … DATE
 dit pnl [--account A[,B]] [--tickers S[,S]] [--ccy USD[,CAD]] [--reporting-ccy CAD]
 dit pnl --time-series […]                   # slice the window into periods
+dit pnl --time-series --daily                # force one row per day
 ```
 
 Pure store read — never the network. Two columns answer two different
@@ -426,7 +427,9 @@ Honesty rules the report will not break:
 period and currency, each period computed by the same engine with its
 own baseline close (strictly before the period start). Period size is
 AUTO — monthly above 8 weeks, weekly above 10 days, daily below — and
-always named in the header (`series: monthly periods`). Because the
+always named in the header (`series: monthly periods`); `--daily`
+forces daily periods at any length (marked `(forced)`), and alone it
+is a usage error — it only modifies `--time-series`. Because the
 slices are contiguous, they telescope: when every period is
 measurable the footer says `Σ periods = window total (exact)`; if any
 period lacks a price pair the sum is refused (`Σ ≠ … GAPS, not
@@ -447,6 +450,7 @@ never silently widen back to "all". `--json` emits `pnl/1` (see
 ```bash
 dit pnl --horizon 1m                       # last month's story
 dit pnl --time-series                      # same window, sliced by period
+dit pnl --time-series --daily              # one row per day, all of them
 dit pnl --time-series --from 2026-01-01 --to 2026-09-30
 dit pnl --account "CAD TSFA"               # per-account tables
 dit pnl --tickers TSLA.NE --ccy CAD        # one instrument

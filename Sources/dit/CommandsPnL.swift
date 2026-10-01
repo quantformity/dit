@@ -19,9 +19,15 @@ func splitCSV(_ raw: String) -> [String] {
 func pnlCommand(_ args: [String], global: Global) async throws {
     let options = try Options(args, valueOptions: ["horizon", "from", "to", "account", "tickers",
                                                     "ccy", "reporting-ccy"],
-                              flagOptions: ["time-series"])
+                              flagOptions: ["time-series", "daily"])
     if options["horizon"] != nil, options["from"] != nil || options["to"] != nil {
         throw ParseError("--horizon and --from/--to cannot be combined — pick one window form")
+    }
+    let wantSeries = options.flag("time-series") == true
+    let forceDaily = options.flag("daily") == true
+    if forceDaily, !wantSeries {
+        throw ParseError("--daily is a modifier of --time-series — "
+            + "use 'dit pnl --time-series --daily' (see 'dit help pnl')")
     }
     guard options.positionals.isEmpty else {
         throw ParseError("unexpected argument '\(options.positionals[0])' — "
@@ -133,9 +139,12 @@ func pnlCommand(_ args: [String], global: Global) async throws {
 
     // `--time-series`: slice the SAME window into periods, each one
     // computed by the same engine (adjacent baselines telescope).
+    // `--daily` overrides the auto-picked period size with one day.
     var series: PnLSeries?
-    if options.flag("time-series") == true {
-        let granularity = PnLWindow.autoGranularity(window: window)
+    if wantSeries {
+        let granularity: SeriesGranularity = forceDaily
+            ? .daily
+            : PnLWindow.autoGranularity(window: window)
         series = PnLWindow.computeSeries(portfolio: portfolio,
                                          window: window,
                                          granularity: granularity,
@@ -234,7 +243,8 @@ func pnlCommand(_ args: [String], global: Global) async throws {
                           symbolFilter: symbolFilter, currencyFilter: currencyFilter)
     let allNotes = notes + report.notes
     if let series {
-        print(renderPnLSeries(report, series: series, scope: scope, notes: allNotes))
+        print(renderPnLSeries(report, series: series, forced: forceDaily,
+                              scope: scope, notes: allNotes))
     } else {
         print(renderPnL(report, scopeNote: scope, notes: allNotes))
     }
@@ -244,7 +254,8 @@ func pnlCommand(_ args: [String], global: Global) async throws {
 /// exact where measurable, dashed where not — plus the telescoping
 /// check (Σ periods vs window total) so a sliced report can never
 /// quietly disagree with the whole.
-private func renderPnLSeries(_ report: PnLReport, series: PnLSeries, scope: [String], notes: [String]) -> String {
+private func renderPnLSeries(_ report: PnLReport, series: PnLSeries, forced: Bool,
+                             scope: [String], notes: [String]) -> String {
     var lines: [String] = []
     let window = report.window
     let rangeText: String
@@ -256,7 +267,7 @@ private func renderPnLSeries(_ report: PnLReport, series: PnLSeries, scope: [Str
     lines.append("Historical P&L over time — \(rangeText) (\(window.label))")
     lines.append("  P&L currency: \(report.reportingCurrency.rawValue)")
     lines.append(contentsOf: scope)
-    lines.append("  series: \(series.granularity.label) periods"
+    lines.append("  series: \(series.granularity.label) periods\(forced ? " (forced)" : "")"
         + (series.collapsedEmpty > 0 ? " — \(series.collapsedEmpty) quiet period(s) collapsed" : ""))
 
     if series.isEmpty {

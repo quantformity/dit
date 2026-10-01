@@ -350,7 +350,7 @@ func helpText(for invocation: Invocation) -> String {
         return """
         USAGE: dit pnl [--horizon H | --from DATE [--to DATE]] [--account A[,A...]]
                [--tickers T[,T...]] [--ccy C[,C...]] [--reporting-ccy CCY]
-               [--time-series] [--json] [--offline] [--display CCY] [--store PATH]
+               [--time-series [--daily]] [--json] [--offline] [--display CCY] [--store PATH]
 
           Historical P&L between dates, built from the ledger and the
           market store — two components, never merged:
@@ -388,7 +388,9 @@ func helpText(for invocation: Invocation) -> String {
           --time-series slices the window into periods (auto: monthly
           above 8 weeks, weekly above 10 days, daily below — always
           labelled) and prints one row per period and currency, each
-          computed with its own baseline close. Contiguous periods
+          computed with its own baseline close. --daily forces daily
+          periods at any window length (alone it is a usage error —
+          it only modifies --time-series). Contiguous periods
           telescope: when every period is measurable the printout
           says "Σ periods = window total (exact)"; gaps stay dashed
           and the sum is refused, never faked. Combines with filters.
@@ -397,6 +399,7 @@ func helpText(for invocation: Invocation) -> String {
             dit pnl
             dit pnl --horizon 1y
             dit pnl --time-series                          # default window, sliced
+            dit pnl --time-series --daily                  # every day that speaks
             dit pnl --time-series --from 2026-01-01 --to 2026-09-30
             dit pnl --from 2026-01-01 --to 2026-09-30 --reporting-ccy USD
             dit pnl --account "TFSA" --tickers RBLX.NE --ccy USD

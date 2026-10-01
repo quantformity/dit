@@ -480,6 +480,15 @@ expect_ok_match "ts: July period splits 36 + 5 = 41"   "2026-07.*36\.00.*5\.00.*
 expect_ok_match "ts: monthly slices sum exactly to 51" "Σ periods = window total \(exact" pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
 expect_ok_match "ts: a one-month window goes weekly"  "series: weekly"  pnl pnl --time-series --from 2026-07-01 --to 2026-07-31
 expect_ok_match "ts: a short window goes daily"       "series: daily"   pnl pnl --time-series --from 2026-07-10 --to 2026-07-15
+# --daily FORCES daily periods on any window (marked forced) — and on
+# the pinned July window the daily slices still sum EXACTLY (10+7+14
+# +10 = 41, the July total): the identity is granularity-independent.
+expect_ok_match "ts: --daily forces day periods"       "series: daily periods \(forced\)" pnl pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
+expect_ok_match "ts: --daily slices still sum exact"  "Σ periods = window total \(exact" pnl pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
+expect_ok_match "ts: --daily shows the drift-only day" "2026-07-31.*10\.00" pnl pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
+expect_fail_match "ts: --daily alone is a usage error" 2 "time-series"  pnl pnl --daily
+expect_ok "ts: --daily on a no-market store stays honest" pnl2 pnl --time-series --daily
+expect_ok_match "ts: …and refuses to sum it"           "Σ periods ≠ window total" pnl2 pnl --time-series --daily
 expect_ok_match "ts: empty window stays quiet"         "nothing to report" pnl pnl --time-series --from 2020-01-01 --to 2020-01-31
 # No market data: every cross-boundary period is UNMEASURABLE — the
 # series says so instead of showing a wall of zeros or a fake sum.
@@ -496,6 +505,7 @@ json_ok "ts: json document parses (series mode)"                 pnl --json pnl 
 expect_ok_match "ts: json carries the series + its flags" '"granularity":"monthly"' pnl --json pnl --time-series --from 2026-06-01 --to 2026-07-31
 expect_ok_match "ts: json says the slices reconcile"    '"reconciles":true' pnl --json pnl --time-series --from 2026-06-01 --to 2026-07-31
 expect_ok_match "ts: json without market data refuses to sum" '"reconciles":false' pnl2 --json pnl --time-series
+expect_ok_match "ts: json reports forced daily"  '"granularity":"daily"' pnl --json pnl --time-series --daily --from 2026-07-01 --to 2026-07-31
 
 echo
 echo "================================================"

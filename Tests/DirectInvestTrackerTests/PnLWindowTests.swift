@@ -456,4 +456,42 @@ struct PnLWindowTests {
         #expect(!seriesResult.reconciles)
         #expect(full.combinedTotal == nil)               // window total withheld too
     }
+
+    @Test func forcedDailySlicesStayHonestWithSparseAndDensePrices() throws {
+        let (portfolio, acct) = pinnedFixture()
+        func dailySeries(_ market: MarketData?) -> (PnLSeries, PnLReport) {
+            let window = PnLReport.Window(start: day(2026, 6, 1), end: day(2026, 7, 31), label: "t")
+            let full = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
+                                         perAccount: false, symbols: nil, currencies: nil,
+                                         reportingCurrency: .usd, market: market, rate: nil)
+            let seriesResult = PnLWindow.computeSeries(portfolio: portfolio, window: window,
+                                                       granularity: .daily, accounts: [acct],
+                                                       perAccount: false, symbols: nil,
+                                                       currencies: nil, reportingCurrency: .usd,
+                                                       market: market, rate: nil,
+                                                       fullReport: full)
+            return (seriesResult, full)
+        }
+        // SPARSE: two closes only. Days without a baseline are gaps —
+        // the series must refuse to sum, never present its partial
+        // totals as the answer.
+        let sparse = dailySeries(MarketData(series: ["WIDE":
+            series("WIDE", .usd, [(day(2026, 6, 30), "6.00"), (day(2026, 7, 31), "8.00")])]))
+        #expect(!sparse.0.reconciles)
+        #expect(sparse.0.collapsedUnmeasurable > 0)
+        // DENSE: a close EVERY day (6.00 June 10 through Jul 31). Now
+        // every day is measurable and the identity must hold exactly:
+        // +10 (Jun 10, born at 6.00) + 10 (Jul 10: −5 drift + 15 sale)
+        // + 7 (Jul 20 dividend) = 27 = the window total.
+        var dense: [(Date, String)] = []
+        var d = day(2026, 6, 10)
+        while d <= day(2026, 7, 31) { dense.append((d, "6.00")); d = PnLWindow.addDays(d, 1) }
+        let denseResult = dailySeries(MarketData(series: ["WIDE": series("WIDE", .usd, dense)]))
+        #expect(denseResult.0.reconciles)
+        #expect(denseResult.0.collapsedUnmeasurable == 0)
+        let sum = denseResult.0.points.flatMap(\.report.perCurrency)
+            .reduce(Decimal.zero) { $0 + ($1.total ?? 0) }
+        #expect(sum == dec("27.00"))
+        #expect(denseResult.1.perCurrency.first?.total == dec("27.00"))
+    }
 }

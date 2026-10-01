@@ -553,3 +553,10 @@ and the user decides.
 - e2e §20: 19 checks pin the identity (10 + 41 = 51 on the fixture),
   the auto-granularity labels, quiet/dashed windows, `--time-series=false`,
   and JSON reconcile flags both ways. 261/261 + 163/112 unit tests.
+- Added `--daily` (modifier of `--time-series`): forces daily periods
+  at any window length, header marked "(forced)"; alone it exits 2 —
+  same no-mix discipline as horizon/dates. Identity is
+  granularity-independent: dense-fixture daily slices still sum
+  exactly (27.00 == window total, unit-tested); the real store's
+  sparse history correctly REFUSES the sum and names its 2
+  unmeasurable gaps. 269/269 e2e (8 daily checks), 164 unit tests.
