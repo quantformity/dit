@@ -18,7 +18,8 @@ func splitCSV(_ raw: String) -> [String] {
 /// converts honestly. Reads the market STORE only — it never fetches.
 func pnlCommand(_ args: [String], global: Global) async throws {
     let options = try Options(args, valueOptions: ["horizon", "from", "to", "account", "tickers",
-                                                    "ccy", "reporting-ccy"])
+                                                    "ccy", "reporting-ccy"],
+                              flagOptions: ["time-series"])
     if options["horizon"] != nil, options["from"] != nil || options["to"] != nil {
         throw ParseError("--horizon and --from/--to cannot be combined — pick one window form")
     }
@@ -130,6 +131,24 @@ func pnlCommand(_ args: [String], global: Global) async throws {
                                    market: marketData,
                                    rate: rate)
 
+    // `--time-series`: slice the SAME window into periods, each one
+    // computed by the same engine (adjacent baselines telescope).
+    var series: PnLSeries?
+    if options.flag("time-series") == true {
+        let granularity = PnLWindow.autoGranularity(window: window)
+        series = PnLWindow.computeSeries(portfolio: portfolio,
+                                         window: window,
+                                         granularity: granularity,
+                                         accounts: accounts,
+                                         perAccount: perAccount,
+                                         symbols: symbolFilter,
+                                         currencies: currencyFilter,
+                                         reportingCurrency: reporting,
+                                         market: marketData,
+                                         rate: rate,
+                                         fullReport: report)
+    }
+
     // MARK: JSON — one document, nulls where a number would lie
     if global.json {
         let windowJSON: [String: Any] = [
@@ -180,14 +199,132 @@ func pnlCommand(_ args: [String], global: Global) async throws {
         } else {
             data["combined"] = NSNull()
         }
+        if let series {
+            let pointsJSON = series.points.map { point -> [String: Any] in
+                let totalsJSON = point.report.perCurrency.map { total -> [String: Any] in
+                    [
+                        "currency": total.currency.rawValue,
+                        "realized": JSONOutput.money(total.realized),
+                        "positionChange": total.positionChange.map { JSONOutput.money($0) } ?? NSNull(),
+                        "total": total.total.map { JSONOutput.money($0) } ?? NSNull(),
+                        "incompletePositions": total.incompletePositions,
+                    ]
+                }
+                return [
+                    "label": point.label,
+                    "start": JSONOutput.isoDay(point.start),
+                    "end": JSONOutput.isoDay(point.end),
+                    "currencyTotals": totalsJSON,
+                ]
+            }
+            data["series"] = [
+                "granularity": series.granularity.label,
+                "reconciles": series.reconciles,
+                "collapsedEmpty": series.collapsedEmpty,
+                "collapsedUnmeasurable": series.collapsedUnmeasurable,
+                "points": pointsJSON,
+            ]
+        }
         print(JSONOutput.envelope(schema: "pnl/1", data: data))
         return
     }
 
     // MARK: Human rendering
-    print(renderPnL(report, scopeNote: scopeNote(report, accounts: accounts, perAccount: perAccount,
-                                                  symbolFilter: symbolFilter, currencyFilter: currencyFilter),
-                    notes: notes + report.notes))
+    let scope = scopeNote(report, accounts: accounts, perAccount: perAccount,
+                          symbolFilter: symbolFilter, currencyFilter: currencyFilter)
+    let allNotes = notes + report.notes
+    if let series {
+        print(renderPnLSeries(report, series: series, scope: scope, notes: allNotes))
+    } else {
+        print(renderPnL(report, scopeNote: scope, notes: allNotes))
+    }
+}
+
+/// The time-series view: one row per period × currency, native and
+/// exact where measurable, dashed where not — plus the telescoping
+/// check (Σ periods vs window total) so a sliced report can never
+/// quietly disagree with the whole.
+private func renderPnLSeries(_ report: PnLReport, series: PnLSeries, scope: [String], notes: [String]) -> String {
+    var lines: [String] = []
+    let window = report.window
+    let rangeText: String
+    if window.fromLedgerStart {
+        rangeText = "since first transaction (\(shortDate(window.start))) … \(shortDate(window.end))"
+    } else {
+        rangeText = "\(shortDate(window.start)) … \(shortDate(window.end))"
+    }
+    lines.append("Historical P&L over time — \(rangeText) (\(window.label))")
+    lines.append("  P&L currency: \(report.reportingCurrency.rawValue)")
+    lines.append(contentsOf: scope)
+    lines.append("  series: \(series.granularity.label) periods"
+        + (series.collapsedEmpty > 0 ? " — \(series.collapsedEmpty) quiet period(s) collapsed" : ""))
+
+    if series.isEmpty {
+        lines.append("")
+        if !report.hadActivity {
+            lines.append("  No transactions in this window and no measurable price drift — nothing to report.")
+        } else {
+            lines.append("  \(report.activityCount) ledger line(s) in the window, none with P&L or measurable drift.")
+        }
+        if series.collapsedUnmeasurable > 0 {
+            lines.append("  \(series.collapsedUnmeasurable) period(s) had NO usable price pair — unmeasurable,"
+                + " not zero; nothing was invented for them")
+        }
+        if !notes.isEmpty {
+            lines.append("")
+            for note in notes { lines.append("  \(note)") }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    let showConverted = report.perCurrency.contains { $0.currency != report.reportingCurrency }
+    lines.append("")
+    lines.append("P&L per period (native; — = not measurable, never zero):")
+    var headers = ["Period", "Ccy", "Realized", "Position Δ", "Total"]
+    if showConverted { headers.append("Total (\(report.reportingCurrency.rawValue))") }
+    var rows: [[String]] = []
+    for point in series.points {
+        let derived = point.report.rows.contains(where: \.usedDerivedHistory)
+        for total in point.report.perCurrency {
+            var label = point.label + (derived ? "*" : "")
+            if point.report.activityCount > 0 { label += " \u{00B7}" + " \(point.report.activityCount) tx" }
+            var row = [label,
+                       total.currency.rawValue,
+                       amountOnly(total.realized),
+                       total.positionChange.map { amountOnly($0) } ?? "—",
+                       total.total.map { amountOnly($0) } ?? "—"]
+            if showConverted {
+                var converted: String?
+                if total.currency == report.reportingCurrency {
+                    converted = total.total.map { amountOnly($0) }
+                } else if let amount = total.total,
+                          let factor = report.conversionUsed.first(where: { $0.from == total.currency })?.rate {
+                    converted = amountOnly(amount * factor)
+                }
+                row.append(converted ?? "—")
+            }
+            rows.append(row)
+        }
+    }
+    lines.append(contentsOf: Table.render(headers: headers, rows: rows, leftColumns: [0, 1]).map { "  \($0)" })
+
+    // Telescoping check — the series must sum to the window total or
+    // say exactly why it cannot.
+    if series.reconciles {
+        lines.append("  Σ periods = window total (exact — every period measurable)")
+    } else {
+        lines.append("  Σ periods ≠ window total — dashed periods are GAPS, not zeros;"
+            + " totals above must not be summed")
+    }
+    if series.collapsedUnmeasurable > 0 {
+        lines.append("  (\(series.collapsedUnmeasurable) period(s) hidden with UNMEASURABLE drift"
+            + " (no price pair) — unmeasurable is NOT zero)")
+    }
+    if !notes.isEmpty {
+        lines.append("")
+        for note in notes { lines.append("  \(note)") }
+    }
+    return lines.joined(separator: "\n")
 }
 
 /// Header/scope lines for the text view (what the flags selected).

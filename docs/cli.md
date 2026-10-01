@@ -388,6 +388,7 @@ dit pnl --horizon 2w|3m|1y|ytd|90d          # relative window ending today
 dit pnl --from DATE [--to DATE]             # explicit window (both ends inclusive)
 dit pnl --to DATE                           # ledger start … DATE
 dit pnl [--account A[,B]] [--tickers S[,S]] [--ccy USD[,CAD]] [--reporting-ccy CAD]
+dit pnl --time-series […]                   # slice the window into periods
 ```
 
 Pure store read — never the network. Two columns answer two different
@@ -421,6 +422,21 @@ Honesty rules the report will not break:
 - Position series explicitly stored in a *different* currency than
   the holding are never used (different instrument, not a conversion).
 
+**`--time-series` — the window sliced into periods.** One row per
+period and currency, each period computed by the same engine with its
+own baseline close (strictly before the period start). Period size is
+AUTO — monthly above 8 weeks, weekly above 10 days, daily below — and
+always named in the header (`series: monthly periods`). Because the
+slices are contiguous, they telescope: when every period is
+measurable the footer says `Σ periods = window total (exact)`; if any
+period lacks a price pair the sum is refused (`Σ ≠ … GAPS, not
+zeros`) — a sliced report can never quietly disagree with the whole.
+Truly quiet periods (nothing booked, measured zero drift) collapse
+into a counted note; periods with UNMEASURABLE drift are counted
+separately — "nothing happened" and "nothing is knowable" are
+different facts. Works with the filters and `--json` (the slices ride
+along under `"series"`); `--time-series=false` is the normal view.
+
 Usage errors (exit 2): mixing `--horizon` with `--from/--to`, unknown
 horizon token, malformed or impossible date, `--to` before `--from`,
 stray positional. An unknown `--account` is a lookup error (exit 1).
@@ -430,6 +446,8 @@ never silently widen back to "all". `--json` emits `pnl/1` (see
 
 ```bash
 dit pnl --horizon 1m                       # last month's story
+dit pnl --time-series                      # same window, sliced by period
+dit pnl --time-series --from 2026-01-01 --to 2026-09-30
 dit pnl --account "CAD TSFA"               # per-account tables
 dit pnl --tickers TSLA.NE --ccy CAD        # one instrument
 dit pnl --to 2026-06-30 --reporting-ccy USD

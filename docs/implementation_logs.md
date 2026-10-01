@@ -530,3 +530,26 @@ and the user decides.
   is the honest default.
 - e2e §19 pins the math (July window: realized 22 + drift 5 = 27)
   and the dash/withheld semantics across 52 new checks: 242/242.
+
+## 2026-10-01 — `--time-series`: the window sliced into periods
+- `dit pnl --time-series` prints one row per period × currency. Each
+  period is one `PnLWindow.compute` call with its own baseline close
+  (strictly before the period start) — a view over the SAME engine,
+  not a second P&L model.
+- Buckets are contiguous by construction (the monthly walk starts at
+  the first of the month, weeks chain from the window start), which
+  is what makes drifts telescope: Σ period drifts = window drift
+  whenever every slice is measurable. The renderer asserts it:
+  "Σ periods = window total (exact)" or "Σ ≠ … GAPS, not zeros".
+- Period size auto-picks (monthly >8 weeks, weekly >10 days, else
+  daily) and is always labelled; no hidden parameters.
+- Empty vs unmeasurable stays a real distinction: truly quiet periods
+  (no booked facts, measured-zero drift) collapse with a counted
+  note; periods with NO price pair are counted separately and break
+  the reconciliation — "nothing happened" is a fact, "nothing is
+  knowable" is a data gap, and neither may render as 0.00.
+- JSON: `--time-series` adds `data.series` (points keep the null
+  contract; `reconciles` is the integrity flag for machine callers).
+- e2e §20: 19 checks pin the identity (10 + 41 = 51 on the fixture),
+  the auto-granularity labels, quiet/dashed windows, `--time-series=false`,
+  and JSON reconcile flags both ways. 261/261 + 163/112 unit tests.

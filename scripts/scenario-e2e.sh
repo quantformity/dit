@@ -463,6 +463,41 @@ expect_ok_match "pnl: json without market data nulls the change" '"positionChang
 expect_fail_match "pnl: chart refuses pnl/1 honestly" 1 "no chart defined" bash -c "'$DIT' --json --store '$PD/store' --market-store '$PD/market' pnl | '$CHART'"
 
 echo
+echo "-- 20. P&L time series (--time-series) — slices that must add back --"
+# Each period is computed by the SAME engine with its own baseline
+# (strictly before the period start), so contiguous periods telescope:
+# when every period is measurable, Σ periods MUST equal the window
+# total — the script asserts the identity, not just the shape.
+expect_ok_match "ts: default shows a period table"      "P&L per period"      pnl pnl --time-series
+expect_ok_match "ts: granularity is always labelled"   "series: (monthly|weekly|daily) periods" pnl pnl --time-series
+expect_ok_match "ts: Σ slices match the window (default)" "Σ periods = window total \(exact" pnl pnl --time-series
+# Pinned two-month window: June drift +10 (buy at 5, mark 6.00),
+# July = realized 36 (sell 15 + WIDE div 7 + SHOP div 14) + drift 5
+# = 41; 10 + 41 = 51 = the whole window's total. Exact, and the
+# script checks that EXACTNESS.
+expect_ok_match "ts: June period carries its drift"     "2026-06.*10\.00"           pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
+expect_ok_match "ts: July period splits 36 + 5 = 41"   "2026-07.*36\.00.*5\.00.*41\.00" pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
+expect_ok_match "ts: monthly slices sum exactly to 51" "Σ periods = window total \(exact" pnl pnl --time-series --from 2026-06-01 --to 2026-07-31
+expect_ok_match "ts: a one-month window goes weekly"  "series: weekly"  pnl pnl --time-series --from 2026-07-01 --to 2026-07-31
+expect_ok_match "ts: a short window goes daily"       "series: daily"   pnl pnl --time-series --from 2026-07-10 --to 2026-07-15
+expect_ok_match "ts: empty window stays quiet"         "nothing to report" pnl pnl --time-series --from 2020-01-01 --to 2020-01-31
+# No market data: every cross-boundary period is UNMEASURABLE — the
+# series says so instead of showing a wall of zeros or a fake sum.
+expect_ok_match "ts2: dashed series, honest sum line" "Σ periods ≠ window total" pnl2 pnl --time-series
+expect_ok_match "ts2: unmeasurable is named as a gap" "NOT zero"                pnl2 pnl --time-series
+# Combinability: series mode is a VIEW, filters still scope it.
+expect_ok_match "ts: --account keeps per-account scope" "P&L One"  pnl pnl --time-series --account "P&L One"
+expect_ok_match "ts: filter matching nothing stays quiet" "nothing to report|none with" pnl pnl --time-series --ccy GBP
+expect_ok "ts: --time-series=false = normal view"     pnl pnl --time-series=false
+expect_ok_match "ts: normal view came back"           "By currency"             pnl pnl --time-series=false
+# --json: the series rides along under data.series, reconciles flag
+# included; nulls stay nulls.
+json_ok "ts: json document parses (series mode)"                 pnl --json pnl --time-series
+expect_ok_match "ts: json carries the series + its flags" '"granularity":"monthly"' pnl --json pnl --time-series --from 2026-06-01 --to 2026-07-31
+expect_ok_match "ts: json says the slices reconcile"    '"reconciles":true' pnl --json pnl --time-series --from 2026-06-01 --to 2026-07-31
+expect_ok_match "ts: json without market data refuses to sum" '"reconciles":false' pnl2 --json pnl --time-series
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"

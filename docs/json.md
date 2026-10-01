@@ -396,6 +396,27 @@ Contract details:
   `"position"` = keyed by a ticker (a dividend-only line has
   `positionChange:"0.00"` — no position, nothing to mark).
 
+With `--time-series`, `data` additionally carries `"series"`:
+
+```json
+"series":{"granularity":"monthly","reconciles":true,
+  "collapsedEmpty":18,"collapsedUnmeasurable":0,
+  "points":[{"label":"2026-07","start":"2026-07-01","end":"2026-07-31",
+              "currencyTotals":[{"currency":"USD","realized":"36.00",
+                "positionChange":"5.00","total":"41.00","incompletePositions":0}]}]}
+```
+
+- `points` are CONTIGUOUS slices of the window (empty periods are
+  collapsed and counted in `collapsedEmpty`); the totals use the
+  same native-exact rules as `currencyTotals`.
+- `reconciles` is the integrity flag: `true` means the slices sum to
+  the window total (every period measurable); `false` means at least
+  one gap lives in the series — do NOT sum the points into a total.
+- `collapsedUnmeasurable` counts periods whose drift was NOT
+  computable (no price pair) — a data gap, distinct from
+  `collapsedEmpty` (a measured zero). Both are reported, never
+  hidden.
+
 ## Scripting notes
 
 ```bash

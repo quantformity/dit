@@ -332,4 +332,128 @@ struct PnLWindowTests {
                                      reportingCurrency: .usd, market: nil, rate: nil)
         #expect(none.rows.isEmpty)
     }
+
+    // MARK: time series (--time-series)
+
+    @Test func monthlyBucketsCoverEveryDayExactlyOnce() throws {
+        // Contiguity is what makes the telescoping identity true: no
+        // day may appear in two buckets or in none.
+        let window = PnLReport.Window(start: day(2026, 6, 10), end: day(2026, 8, 31), label: "t")
+        let buckets = PnLWindow.seriesBuckets(window: window, granularity: .monthly)
+        #expect(buckets.map(\.label) == ["2026-06-10…2026-06-30", "2026-07", "2026-08"])
+        var covered: [Date] = []
+        for bucket in buckets {
+            var d = bucket.start
+            while d <= bucket.end { covered.append(d); d = PnLWindow.addDays(d, 1) }
+        }
+        var expected: [Date] = []
+        var d = day(2026, 6, 10)
+        while d <= day(2026, 8, 31) { expected.append(d); d = PnLWindow.addDays(d, 1) }
+        #expect(covered == expected)
+    }
+
+    @Test func weeklyBucketsChainAndGranularityScales() throws {
+        let window = PnLReport.Window(start: day(2026, 7, 1), end: day(2026, 7, 31), label: "t")
+        let buckets = PnLWindow.seriesBuckets(window: window, granularity: .weekly)
+        #expect(buckets.count == 5)
+        #expect(buckets.map { $0.end.timeIntervalSince($0.start) / 86_400 + 1 } == [7, 7, 7, 7, 3])
+        // Auto-pick keeps a window to a handful of readable periods.
+        #expect(PnLWindow.autoGranularity(window: window) == .weekly)
+        let twoMonths = PnLReport.Window(start: day(2026, 6, 1), end: day(2026, 7, 31), label: "t")
+        #expect(PnLWindow.autoGranularity(window: twoMonths) == .monthly)
+        let twelve = PnLReport.Window(start: day(2026, 7, 20), end: day(2026, 7, 31), label: "t")
+        #expect(PnLWindow.autoGranularity(window: twelve) == .weekly)
+        let short = PnLReport.Window(start: day(2026, 7, 22), end: day(2026, 7, 31), label: "t")
+        #expect(PnLWindow.autoGranularity(window: short) == .daily)
+    }
+
+    /// The pinned fixture: 10 @ 5 bought Jun 10 (cost 50), half sold
+    /// Jul 10 at 8 (+15), a 7 dividend Jul 20; closes 6.00 (Jun 30)
+    /// and 8.00 (Jul 31). June drift = 60−50 = +10 (marked from cost,
+    /// born inside June); July = realized 22 + drift 5 (10 shares at
+    /// 6.00 → 5 shares at 8.00) = 27.
+    private func pinnedFixture() -> (Portfolio, Account) {
+        let acct = Account(reportingCurrency: .usd, name: "T")
+        let txs: [Transaction] = [
+            Transaction(date: day(2026, 6, 10), accountID: acct.id, currency: .usd,
+                        kind: .stockPurchase(StockDetails(ticker: "WIDE", shares: 10, price: 5))),
+            Transaction(date: day(2026, 7, 10), accountID: acct.id, currency: .usd,
+                        kind: .stockSale(StockDetails(ticker: "WIDE", shares: 5, price: 8))),
+            Transaction(date: day(2026, 7, 20), accountID: acct.id, currency: .usd,
+                        kind: .dividend(DividendDetails(ticker: "WIDE", amount: 7))),
+        ]
+        return (Portfolio(accounts: [acct], transactions: txs), acct)
+    }
+
+    @Test func seriesTelescopesToTheWindowTotalWhenEveryBucketIsPriced() throws {
+        let (portfolio, acct) = pinnedFixture()
+        let market = MarketData(series: ["WIDE":
+            series("WIDE", .usd, [(day(2026, 6, 30), "6.00"), (day(2026, 7, 31), "8.00")])])
+        let window = PnLReport.Window(start: day(2026, 6, 1), end: day(2026, 7, 31), label: "t")
+        let full = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
+                                     perAccount: false, symbols: nil, currencies: nil,
+                                     reportingCurrency: .usd, market: market, rate: nil)
+        let seriesResult = PnLWindow.computeSeries(portfolio: portfolio, window: window,
+                                                   granularity: .monthly, accounts: [acct],
+                                                   perAccount: false, symbols: nil, currencies: nil,
+                                                   reportingCurrency: .usd, market: market,
+                                                   rate: nil, fullReport: full)
+        #expect(seriesResult.granularity == .monthly)
+        #expect(seriesResult.points.count == 2)
+        let june = seriesResult.points[0]
+        let july = seriesResult.points[1]
+        #expect(june.label == "2026-06")
+        #expect(july.label == "2026-07")
+        #expect(june.report.perCurrency.first?.total == dec("10.00"))
+        #expect(july.report.perCurrency.first?.realized == dec("22.00"))
+        #expect(july.report.perCurrency.first?.positionChange == dec("5.00"))
+        #expect(july.report.perCurrency.first?.total == dec("27.00"))
+        // The whole point of contiguous buckets: they ADD BACK.
+        #expect(seriesResult.reconciles)
+        #expect(full.perCurrency.first?.total == dec("37.00"))
+    }
+
+    @Test func quietPeriodsWithEqualPricesCollapseAndKeepTheSumExact() throws {
+        let (portfolio, acct) = pinnedFixture()
+        // August and September keep the last price (8.00): zero drift
+        // is a MEASURED zero, not a gap — collapsed, and the series
+        // still reconciles.
+        let market = MarketData(series: ["WIDE":
+            series("WIDE", .usd, [(day(2026, 6, 30), "6.00"), (day(2026, 7, 31), "8.00"),
+                                  (day(2026, 9, 30), "8.00")])])
+        let window = PnLReport.Window(start: day(2026, 6, 1), end: day(2026, 9, 30), label: "t")
+        let full = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
+                                     perAccount: false, symbols: nil, currencies: nil,
+                                     reportingCurrency: .usd, market: market, rate: nil)
+        let seriesResult = PnLWindow.computeSeries(portfolio: portfolio, window: window,
+                                                   granularity: .monthly, accounts: [acct],
+                                                   perAccount: false, symbols: nil, currencies: nil,
+                                                   reportingCurrency: .usd, market: market,
+                                                   rate: nil, fullReport: full)
+        #expect(seriesResult.collapsedEmpty == 2) // Aug, Sep: measured zero drift
+        #expect(seriesResult.collapsedUnmeasurable == 0)
+        #expect(seriesResult.reconciles)
+    }
+
+    @Test func unmeasurableBucketsBreakTheSumAndAreCountedNotHidden() throws {
+        let (portfolio, acct) = pinnedFixture()
+        // NO market at all: June drift is unknowable (born mid-June,
+        // no baseline/closing price), July books facts but dashes the
+        // total, August silently holds an unmeasurable position. None
+        // of it may collapse into a fake "0.00" or a reconciled sum.
+        let window = PnLReport.Window(start: day(2026, 6, 1), end: day(2026, 8, 31), label: "t")
+        let full = PnLWindow.compute(portfolio: portfolio, window: window, accounts: [acct],
+                                     perAccount: false, symbols: nil, currencies: nil,
+                                     reportingCurrency: .usd, market: nil, rate: nil)
+        let seriesResult = PnLWindow.computeSeries(portfolio: portfolio, window: window,
+                                                   granularity: .monthly, accounts: [acct],
+                                                   perAccount: false, symbols: nil, currencies: nil,
+                                                   reportingCurrency: .usd, market: nil,
+                                                   rate: nil, fullReport: full)
+        #expect(seriesResult.points.count == 1)          // only July (booked facts)
+        #expect(seriesResult.points[0].report.perCurrency.first?.total == nil) // dashed
+        #expect(seriesResult.collapsedUnmeasurable == 2) // June and August
+        #expect(!seriesResult.reconciles)
+        #expect(full.combinedTotal == nil)               // window total withheld too
+    }
 }

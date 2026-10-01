@@ -166,6 +166,85 @@ public struct PnLReport: Sendable {
     public var isEmpty: Bool { rows.isEmpty }
 }
 
+/// How `--time-series` slices a window into reporting periods. The
+/// size is AUTO-PICKED from the window length (see
+/// ``PnLWindow/autoGranularity(window:)``) and always labelled in the
+/// header — a period is a reporting choice, not a hidden parameter.
+public enum SeriesGranularity: Sendable {
+    /// calendar months (partial months at the window edges allowed)
+    case monthly
+    /// 7-day periods starting at the window start
+    case weekly
+    /// one UTC day per point
+    case daily
+
+    /// Header text naming the slicing (never implicit).
+    public var label: String {
+        switch self {
+        case .monthly: return "monthly"
+        case .weekly: return "weekly"
+        case .daily: return "daily"
+        }
+    }
+}
+
+/// One visible point of a P&L time series: one period, computed with
+/// EXACTLY the same machinery as a window report (its own baseline
+/// price strictly before its start, its own closing price at its end),
+/// so adjacent periods telescope back to the window total — the
+/// identity the CLI checks and prints.
+public struct PnLSeriesPoint: Sendable {
+    /// Period label ("2026-06", "2026-06-10…30", "2026-06-10…2026-06-16").
+    public let label: String
+    /// Inclusive first day of the period.
+    public let start: Date
+    /// Inclusive last day of the period.
+    public let end: Date
+    /// The period's report (rows and per-currency totals, same
+    /// dashed-when-unknown contract as a window report).
+    public let report: PnLReport
+
+    public init(label: String, start: Date, end: Date, report: PnLReport) {
+        self.label = label
+        self.start = start
+        self.end = end
+        self.report = report
+    }
+}
+
+/// A whole series plus the honesty bookkeeping the renderer needs:
+/// how many quiet periods were collapsed (and how many of those were
+/// actually UNMEASURABLE, which is a different fact), and whether the
+/// series sums to the window total (exact telescoping, no dashes).
+public struct PnLSeries: Sendable {
+    public let granularity: SeriesGranularity
+    /// Only periods with something to say (booked facts or measurable
+    /// drift). Truly quiet periods are collapsed and counted.
+    public let points: [PnLSeriesPoint]
+    /// Periods with zero booked P&L AND zero measurable drift (a true
+    /// nothing-happened fact, collapsed to keep the table readable).
+    public let collapsedEmpty: Int
+    /// Periods where drift existed in principle but NO price pair
+    /// allowed measuring it — collapsed from the table but NOTERIED,
+    /// because "unmeasurable" is not "nothing happened".
+    public let collapsedUnmeasurable: Int
+    /// true when every period was complete AND the per-currency sums
+    /// match the window totals (within a cent of exact Decimal math).
+    /// false means the series is NOT summable to a total.
+    public let reconciles: Bool
+
+    public init(granularity: SeriesGranularity, points: [PnLSeriesPoint],
+                collapsedEmpty: Int, collapsedUnmeasurable: Int, reconciles: Bool) {
+        self.granularity = granularity
+        self.points = points
+        self.collapsedEmpty = collapsedEmpty
+        self.collapsedUnmeasurable = collapsedUnmeasurable
+        self.reconciles = reconciles
+    }
+
+    public var isEmpty: Bool { points.isEmpty }
+}
+
 /// Window resolution + computation for the `dit pnl` command. Pure
 /// functions over (ledger + market store), no network, no state.
 public enum PnLWindow {
@@ -544,6 +623,165 @@ public enum PnLWindow {
                          combinedTotal: combined, conversionUsed: used,
                          unconvertedCurrencies: unconverted, incompleteCurrencies: withheld,
                          untrackedShorts: shortFlags, notes: notes, activityCount: activity)
+    }
+
+    // MARK: Time series (`--time-series`)
+
+    /// Auto-pick the period size: windows over 8 weeks report by
+    /// calendar month, over 10 days by 7-day period, shorter ones by
+    /// day. Chosen so a typical horizon yields a handful of readable
+    /// periods, never a wall of one-row stories. The choice is always
+    /// printed in the header — nothing is hidden.
+    public static func autoGranularity(window: PnLReport.Window) -> SeriesGranularity {
+        let days = utcDaydiff(window.start, window.end) + 1
+        if days > 56 { return .monthly }
+        if days > 10 { return .weekly }
+        return .daily
+    }
+
+    /// Whole UTC days from `from` to `to` inclusive-minus-one
+    /// (i.e. `to − from` in days).
+    static func utcDaydiff(_ from: Date, _ to: Date) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar.dateComponents([.day], from: from, to: to).day ?? 0
+    }
+
+    /// Slice a window into inclusive, CONTIGUOUS period buckets
+    /// covering every day from start to end exactly once. Adjacency
+    /// is the whole point: each bucket's baseline lookup (strictly
+    /// before its start) finds the same last close the previous
+    /// bucket used as its closing mark, so drifts telescope without
+    /// double counting.
+    public static func seriesBuckets(window: PnLReport.Window,
+                                     granularity: SeriesGranularity) -> [(label: String, start: Date, end: Date)] {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        func iso(_ date: Date) -> String { TextFormat.day(date) }
+        var buckets: [(label: String, start: Date, end: Date)] = []
+
+        func label(_ start: Date, _ end: Date, fullMonth: Bool) -> String {
+            if fullMonth {
+                let parts = calendar.dateComponents([.year, .month], from: start)
+                return String(format: "%04d-%02d", parts.year ?? 0, parts.month ?? 0)
+            }
+            if start == end { return iso(start) }
+            return iso(start) + "…" + iso(end)
+        }
+
+        switch granularity {
+        case .monthly:
+            // Walk CALENDAR months, starting at the first of the
+            // window's first month — skipping to the window start
+            // would leave the days before it unbucketed (drift in a
+            // gap is drift nobody reports). Full months label as
+            // "2026-07"; partial edge months as date ranges.
+            var components = calendar.dateComponents([.year, .month], from: window.start)
+            components.day = 1
+            var cursor = calendar.date(from: components) ?? window.start
+            while cursor <= window.end {
+                let monthEnd = calendar.date(byAdding: .month, value: 1, to: cursor)!
+                let lastDay = addDays(monthEnd, -1)
+                let start = max(window.start, cursor)
+                let end = min(window.end, lastDay)
+                let full = start == cursor && end == lastDay
+                buckets.append((label(start, end, fullMonth: full), start, end))
+                cursor = monthEnd
+            }
+        case .weekly:
+            var cursor = window.start
+            while cursor <= window.end {
+                let end = min(addDays(cursor, 6), window.end)
+                buckets.append((label(cursor, end, fullMonth: false), cursor, end))
+                cursor = addDays(cursor, 7)
+            }
+        case .daily:
+            var cursor = window.start
+            while cursor <= window.end {
+                buckets.append((iso(cursor), cursor, cursor))
+                cursor = addDays(cursor, 1)
+            }
+        }
+        return buckets
+    }
+
+    /// Compute the per-period series for `window`. Every bucket is one
+    /// ``compute`` call (same filters, same rate closure, same market),
+    /// so the series is the window report sliced — not a second
+    /// financial model. `fullReport` (the whole window) is used ONLY
+    /// to check the telescoping identity and set `reconciles`.
+    public static func computeSeries(portfolio: Portfolio,
+                                     window: PnLReport.Window,
+                                     granularity: SeriesGranularity,
+                                     accounts: [Account],
+                                     perAccount: Bool,
+                                     symbols: Set<String>?,
+                                     currencies: Set<Currency>?,
+                                     reportingCurrency: Currency,
+                                     market: MarketData?,
+                                     rate: FXRate?,
+                                     fullReport: PnLReport) -> PnLSeries {
+        var points: [PnLSeriesPoint] = []
+        var collapsedEmpty = 0
+        var collapsedUnmeasurable = 0
+
+        for bucket in seriesBuckets(window: window, granularity: granularity) {
+            let bucketWindow = PnLReport.Window(start: bucket.start, end: bucket.end,
+                                                label: bucket.label)
+            let report = compute(portfolio: portfolio, window: bucketWindow,
+                                 accounts: accounts, perAccount: perAccount,
+                                 symbols: symbols, currencies: currencies,
+                                 reportingCurrency: reportingCurrency,
+                                 market: market, rate: rate)
+            if report.rows.isEmpty {
+                // A period WITHOUT price data is an unmeasurable gap,
+                // not a quiet period — count it separately so the
+                // renderer can say the true thing.
+                if report.notes.contains(where: { $0.hasPrefix("no usable daily history") }) {
+                    collapsedUnmeasurable += 1
+                } else {
+                    collapsedEmpty += 1
+                }
+                continue
+            }
+            points.append(PnLSeriesPoint(label: bucket.label, start: bucket.start,
+                                         end: bucket.end, report: report))
+        }
+
+        // MARK: telescoping check (per currency, exact Decimal math
+        // allowed a half-cent of regrouping dust, nothing more)
+        let halfCent = Decimal(string: "0.005") ?? Decimal(0)
+        var reconciles = true
+        // A dashed period is a GAP, not a zero: the series cannot be
+        // summed to a total any more.
+        if points.contains(where: { $0.report.perCurrency.contains { $0.total == nil } }) {
+            reconciles = false
+        }
+        if reconciles {
+            let currencies = Set(points.flatMap { $0.report.perCurrency.map(\.currency) })
+            for currency in currencies {
+                let seriesSum = points
+                    .flatMap(\.report.perCurrency)
+                    .filter { $0.currency == currency }
+                    .reduce(Decimal.zero) { sum, point in sum + (point.total ?? 0) }
+                guard let fullTotal = fullReport.perCurrency
+                    .first(where: { $0.currency == currency })?.total else {
+                    reconciles = false
+                    break
+                }
+                var diff = seriesSum - fullTotal
+                if diff < 0 { diff = -diff }
+                if diff >= halfCent { reconciles = false; break }
+            }
+        }
+        // Any collapsed-UNMEASURABLE period breaks summability too:
+        // its (unknown) drift is missing from the sums.
+        if collapsedUnmeasurable > 0 { reconciles = false }
+
+        return PnLSeries(granularity: granularity, points: points,
+                         collapsedEmpty: collapsedEmpty,
+                         collapsedUnmeasurable: collapsedUnmeasurable,
+                         reconciles: reconciles)
     }
 
     // MARK: Replay internals
