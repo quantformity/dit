@@ -84,9 +84,10 @@ expect_fail_match() {
 }
 
 # extract_txid IDPATTERN — newest transaction ID matching the pattern
+# (table rows are Markdown pipes: the ID is the first cell between bars)
 txid() {
   local pattern; pattern="$1"
-  "$DIT" tx list --limit 60 2>/dev/null | grep -E "$pattern" | head -1 | awk '{print $1}'
+  "$DIT" tx list --limit 60 2>/dev/null | grep -E "$pattern" | head -1 | awk -F'|' '{gsub(/ /,"",$2); print $2}'
 }
 
 echo "== Scenario: a year of investing, from a fresh store =="

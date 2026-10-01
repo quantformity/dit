@@ -462,3 +462,23 @@ and the user decides.
 - Dead `requirePortfolio` removed on the way.
 - Tests: +9 (TextFormat contracts, replay determinism, Portfolio helpers);
   137 XCTest + swift-testing pass, e2e 190/190.
+
+## 2026-09-30 — Docstring pass + tables switch to Markdown format
+- Every public type, method, init, and non-obvious property in the
+  library now carries a doc comment; CLI command functions and shared
+  helpers got one-line purpose docs. Doc-only change, verified with
+  the full suite.
+- `Table.render` switched from space-separated aligned text (with a
+  `─` rule) to Markdown pipe tables: `| cell | cell |` + a
+  `---`/`---:` separator rule, padded to column width. Raw terminal
+  reading keeps its alignment; piping into (or pasting into) a
+  Markdown viewer now yields a real rendered table. Pipes in data are
+  escaped (`\|`); alignment markers (`---:`) keep money columns
+  right-aligned in both worlds.
+- Deliberate: no `--md` flag. Markdown is the default table style,
+  not a mode; `--json` stays the machine contract and never carries
+  table syntax.
+- Fixed a pre-existing docs drift found on the way: docs/cli.md
+  advertised INR/SGD (not in the Currency enum) and omitted AUD/NZD.
+- e2e: the `txid` helper scraped the first whitespace field of the
+  old space tables; it now parses the first pipe cell. 190/190 after.

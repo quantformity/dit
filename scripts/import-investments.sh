@@ -158,7 +158,8 @@ $DIT tx deposit --account "CAD RESP" --amount 11.57 --date 2025-01-01 --currency
 # maturity 2026-12-31 read from the product name 'GIC 4.45 Dec26'; rate = source yield_rate (0.0445)
 $DIT tx gic --account "CAD RESP" --product "GIC 4.45 Dec26" --principal 5000 --rate 4.45 --maturity 2026-12-31 --currency CAD
 # tx gic has no --date flag (it records the run date); align it to the source date:
-GIC_ID=$(dit tx list --account "CAD RESP" --limit 500 2>/dev/null | awk '/gicPurchase/ {print $1; exit}')
+# (filter by kind so the row is findable, then pull the first pipe cell = the ID)
+GIC_ID=$($DIT tx list --account "CAD RESP" --kind gicPurchase --limit 20 2>/dev/null | awk -F'|' 'NR>3 {gsub(/ /,"",$2); print $2; exit}')
 [ -n "$GIC_ID" ] && dit tx edit "$GIC_ID" --date 2025-01-01
 $DIT tx buy --account "CAD RESP" --ticker MSFT.TO --shares 75 --price 29.9632 --date 2025-01-01 --currency CAD
 $DIT tx buy --account "CAD RESP" --ticker GOOG.NE --shares 100 --price 34.0788 --date 2025-01-01 --currency CAD

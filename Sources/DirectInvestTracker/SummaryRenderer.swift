@@ -1,32 +1,45 @@
 import Foundation
 
-/// A minimal aligned-text table: two spaces between columns, first
-/// column left-aligned by default, the rest right-aligned. Deterministic
-/// (no locale-dependent measurement) so the same summary always renders
-/// the same way.
+/// A Markdown pipe table: `| cell | cell |` lines with a `---`
+/// separator (right-aligned columns use `---:`). Cells are padded to
+/// the widest value so the table reads aligned in a raw terminal AND
+/// renders as a table in Markdown viewers — one renderer, both jobs.
+/// Pipes inside data are escaped (`\|`) so account names cannot tear
+/// a row apart. Deterministic (no locale-dependent measurement) so
+/// the same summary always renders the same way.
 public enum Table {
-    /// Render a full table (header rule included) with columns aligned
-    /// to the widest cell per column.
+    /// Render a full table (header + separator rule included) with
+    /// columns aligned to the widest cell per column.
     public static func render(headers: [String], rows: [[String]], leftColumns: Set<Int> = [0]) -> [String] {
         let columns = headers.count
+        func escape(_ text: String) -> String {
+            text.replacingOccurrences(of: "|", with: "\\|")
+        }
         let widths = (0..<columns).map { column in
-            ([headers[column]] + rows.map { $0[column] }).map(\.count).max() ?? 0
+            ([headers[column]] + rows.map { $0[column] }).map { escape($0).count }.max() ?? 0
         }
         func format(_ cells: [String]) -> String {
-            let line = (0..<columns).map { column -> String in
-                let cell = cells[column]
+            let body = (0..<columns).map { column -> String in
+                let cell = escape(cells[column])
                 let pad = String(repeating: " ", count: widths[column] - cell.count)
-                return leftColumns.contains(column) ? cell + pad : pad + cell
+                return " " + (leftColumns.contains(column) ? cell + pad : pad + cell) + " "
             }
-            .joined(separator: "  ")
-            // Trim the padding of a final left-aligned column — trailing
-            // whitespace in a "finished" line is noise (diffs, wrapping).
-            var trimmed = Substring(line)
-            while trimmed.hasSuffix(" ") { trimmed = trimmed.dropLast() }
-            return String(trimmed)
+            .joined(separator: "|")
+            return "|" + body + "|"
         }
         var lines = [format(headers)]
-        lines.append(widths.map { String(repeating: "─", count: $0) }.joined(separator: "  "))
+        // The separator carries the alignment: `---:` marks the columns
+        // that read right-aligned, so viewers and raw text agree on
+        // which figures are money and which are labels.
+        let separator = (0..<columns).map { column -> String in
+            let dashes = max(3, widths[column])
+            let rule = leftColumns.contains(column)
+                ? String(repeating: "-", count: dashes)
+                : String(repeating: "-", count: max(2, dashes - 1)) + ":"
+            return " " + rule + " "
+        }
+        .joined(separator: "|")
+        lines.append("|" + separator + "|")
         for row in rows { lines.append(format(row)) }
         return lines
     }
