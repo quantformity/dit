@@ -7,6 +7,7 @@ import DitCore
 //   dit --json | dit-chart --ascii            plain glyph tier
 //   dit --json | dit-chart --html out.html    interactive page (self-contained)
 //   dit --json | dit-chart --html out.html --open   … and open it
+//   dit --json | dit-chart --open             temp page + open it now
 //   dit --json | dit-chart --svg x.svg        refused (use --html)
 //
 // Reads EXACTLY ONE JSON document from stdin, dispatches on its
@@ -36,7 +37,7 @@ while cursor < arguments.endIndex {
         cursor += 1
     case "--html":
         guard cursor + 1 < arguments.endIndex, !arguments[cursor + 1].hasPrefix("--")
-        else { fail("--html needs an output file path (use --html - to print the page)", code: 2) }
+        else { fail("--html needs an output file path (or use --open for a temp page, --html - to print)", code: 2) }
         htmlPath = arguments[cursor + 1]
         cursor += 2
     case "--open":
@@ -67,8 +68,12 @@ while cursor < arguments.endIndex {
                 --html PATH  write an interactive page (hover tooltips,
                              line charts for quote series) instead of
                              printing; PATH "-" prints the page instead
-                --open       after --html, open the page in the system
-                             viewer (open/xdg-open)
+                --open       write the page and open it in the system
+                             viewer (open/xdg-open). With --html PATH it
+                             opens that file; alone it writes one temp
+                             file per chart kind (overwritten — repeated
+                             --open never piles up files) and prints
+                             where it went.
                 --svg PATH   not implemented — refuses instead of
                              silently ignoring (use --html)
 
@@ -86,8 +91,8 @@ while cursor < arguments.endIndex {
     }
 }
 
-if openAfter && htmlPath == nil {
-    fail("--open needs --html PATH (nothing to open without a written page)", code: 2)
+if openAfter && htmlPath == "-" {
+    fail("--open needs a written page — '--' prints to stdout (use --html PATH --open, or bare --open for a temp page)", code: 2)
 }
 
 var finalWidth = width
@@ -112,13 +117,22 @@ if stdinData.isEmpty || String(data: stdinData, encoding: .utf8)?.trimmingCharac
 
 // MARK: Chart it — or say precisely why not.
 
-if let path = htmlPath {
+// HTML mode: explicit --html PATH, or bare --open targeting a temp
+// page. The default page is ONE predictable file per chart kind
+// (dit-chart-<schema>.html in the temp dir), OVERWRITTEN per run —
+// repeated --open never piles up files.
+if htmlPath != nil || openAfter {
+    let target: URL?
+    if let path = htmlPath {
+        target = path == "-" ? nil : URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+    } else {
+        let schema = ((try? JSONSerialization.jsonObject(with: stdinData)) as? [String: Any])?["schema"] as? String
+        let name = "dit-chart-\((schema ?? "chart").replacingOccurrences(of: "/", with: "-")).html"
+        target = FileManager.default.temporaryDirectory.appendingPathComponent(name, isDirectory: false)
+    }
     do {
         let page = try ChartHTML.document(fromJSON: stdinData)
-        let url = path == "-"
-            ? nil
-            : URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-        if let url {
+        if let url = target {
             do {
                 try page.write(to: url, atomically: true, encoding: .utf8)
             } catch {

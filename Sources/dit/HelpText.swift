@@ -41,10 +41,10 @@ func helpText(for invocation: Invocation) -> String {
           show, quote, pnl and market coverage — schemas and
           conventions in docs/json.md.
           Pipe it to the chart tool: 'dit --json | dit-chart --ascii'
-          for terminal bars, or 'dit --json | dit-chart --html page.html
-          --open' for one self-contained interactive page (any browser).
-          See 'dit-chart --help' (it refuses documents it cannot
-          honestly chart).
+          for terminal bars, or 'dit --json | dit-chart --open' for one
+          self-contained interactive page (temp file, opens in any
+          browser). See 'dit-chart --help' (it refuses documents it
+          cannot honestly chart).
 
           Group help: dit help <group> — e.g. 'dit help account'.
         """

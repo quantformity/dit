@@ -497,6 +497,7 @@ dit --json | dit-chart --ascii            # plain tier (# ^ ?), pure 7-bit
 dit --json | dit-chart --width 100        # drawing width (default: COLUMNS, 80)
 dit --json | dit-chart --html page.html   # interactive page, one file
 dit --json | dit-chart --html page.html --open    # … and open it
+dit --json | dit-chart --open             # temp page + open it right now
 dit --json | dit-chart --html -           # the page to stdout
 dit --json | dit-chart --svg out.svg      # REFUSED (exit 2, honest — use --html)
 ```
@@ -504,7 +505,10 @@ dit --json | dit-chart --svg out.svg      # REFUSED (exit 2, honest — use --ht
 `--html` writes ONE offline file: no CDN, no network — the chart
 data and a ~2 KB drawing script are embedded. It opens in any
 browser on any OS, and hovering any chart shows the EXACT stored
-values (tooltips), never invented ones. The refusal contract carries
+values (tooltips), never invented ones. Bare `--open` keeps ONE
+predictable temp file per chart kind (`dit-chart-<schema>.html` in
+the temp dir, overwritten each run — repeated `--open` never piles
+up files) and prints where it went. The refusal contract carries
 through: unknown or chartless documents produce no file at all.
 Line-chart honesty rules: one chart per stated currency (mixed or
 unstated units never share an axis); ≥10-day data holes BREAK the

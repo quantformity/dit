@@ -646,7 +646,14 @@ expect_fail_match "html: snapshot quotes refused (no time series)" 1 "no chart d
 # renders — chart carries the source's message, exits 1, writes no page.
 expect_fail_match "html: failed source doc carries its message, no page" 1 "source reported failure" bash -c   "DIT_BACKEND=file DIT_STORE_URL='$CV/store' DIT_MARKET_URL='$CV/market' '$DIT' --json quote FAST --offline | '$CHART' --html '$H/snap2.html'"
 expect_fail_match "html: --html without a path is a usage error" 2 "needs an output file" "$CHART" --html
-expect_fail_match "html: --open needs --html (nothing to open)"  2 "needs --html"        "$CHART" --open
+# Bare --open writes a temp page (overwritten per chart kind) — kept
+# OUT of the automated run because the system viewer would open a
+# window per check; only the NON-opening contracts are pinned:
+# usage errors and refused docs must never reach the launcher.
+expect_fail_match "html: '--html - --open' is a usage error" 2 "needs a written page" bash -c \
+  "'$CHART' --html - --open < '$WORKDIR/acc.json'"
+expect_fail_match "html: bare --open on unknown schema refuses, no file" 1 "no chart defined" bash -c \
+  "'$CHART' --open < '$WORKDIR/acc.json'"
 expect_fail_match "html: empty stdin refused, not an empty page" 1 "no JSON on stdin" bash -c   "'$CHART' --html '$H/empty.html' < /dev/null"
 
 echo
