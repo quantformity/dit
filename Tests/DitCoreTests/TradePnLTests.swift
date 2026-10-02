@@ -223,4 +223,43 @@ struct TradePnLTests {
             Issue.record("both views must be complete for a WIDE-only scope: \(String(describing: windowTotal)) vs \(String(describing: tradeTotal))")
         }
     }
+
+    @Test("a multi-lot sale attributes to the FIFO lots it consumed — and lifetime totals still agree with the average-cost window view")
+    func multiLotFifoAndWindowAgreement() throws {
+        // Buy 10 @ 5 (day 10), buy 5 @ 8 (day 31), sell 12 @ 10 (day 40),
+        // marked at 9.00 (day 42). FIFO: the sale consumes the whole
+        // 5.00 lot plus 2 shares of the 8.00 lot → realized 120 − 66
+        // = +54; the open lot (3 × 8.00) is +3.00. The ledger's own
+        // average-cost accounting slices the SAME lifetime profit
+        // differently (48 booked + 9 drift). Different attribution,
+        // identical total — that is the contract this pins.
+        let portfolio = Portfolio(accounts: [a1], transactions: [
+            tx(a1, 10, .usd, .stockPurchase(StockDetails(ticker: "MULTI", shares: 10, price: 5))),
+            tx(a1, 31, .usd, .stockPurchase(StockDetails(ticker: "MULTI", shares: 5, price: 8))),
+            tx(a1, 40, .usd, .stockSale(StockDetails(ticker: "MULTI", shares: 12, price: 10))),
+        ])
+        let market = MarketData(series: ["MULTI": series("MULTI", .usd, [(42, dec("9.00"))])])
+        let trade = TradePnL.compute(portfolio: portfolio, accounts: [a1], asOf: day(43),
+                                     market: market, symbols: nil, currencies: nil)
+        #expect(trade.booked.count == 1)
+        #expect(trade.booked.first?.pnl == dec("54.00"))
+        #expect(trade.booked.first?.detail.contains("from 2 buys") == true)
+        #expect(trade.open.count == 1)
+        #expect(trade.open.first?.unrealized == Decimal(3))
+        #expect(trade.perCurrency.first?.total == dec("57.00"))
+
+        let w = try PnLWindow.resolveWindow(horizon: nil, from: nil, to: day(43),
+                                            now: day(43), ledgerStart: day(10))
+        let windowReport = PnLWindow.compute(portfolio: portfolio, window: w, accounts: [a1],
+                                             perAccount: true, symbols: nil, currencies: nil,
+                                             reportingCurrency: .usd, market: market, fx: nil)
+        if let windowTotal = windowReport.perCurrency.first?.total,
+           let tradeTotal = trade.perCurrency.first?.total {
+            #expect(abs(windowTotal - dec("57.00")) < dec("0.01"))
+            #expect(abs(tradeTotal - windowTotal) < dec("0.01"),
+                    "views disagree: \(windowTotal) vs \(tradeTotal)")
+        } else {
+            Issue.record("both views must be complete here (prices exist): \(String(describing: windowReport.perCurrency.first?.total)) vs \(String(describing: trade.perCurrency.first?.total))")
+        }
+    }
 }

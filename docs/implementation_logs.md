@@ -881,3 +881,30 @@ not a second financial model:
 routing, foreign-currency series rejected, both reconciliation modes);
 357→370 e2e checks in §22 (dual-engine RECON_OK, dashes, withheld
 totals, usage-error discipline).
+
+## Entry 24 — 2026-10-02 — `tx pnl` goes transaction-level: FIFO lot attribution
+
+User feedback on the first cut: "not the position level, I want the
+transaction level." Average cost genuinely cannot answer that for
+open positions (a blended cost has no per-trade split), so the view
+moved to FIFO LOT ATTRIBUTION: each buy is a lot, a sale realizes
+against the oldest lots it consumed, and open rows are PER BUY with
+`held of bought` visible.
+
+What keeps this honest rather than a second ledger:
+- Attribution, not accounting. The ledger's own books (AccountBalances,
+  `dit pnl`) stay average-cost; a multi-lot slice reads differently
+  in each view. The header, the notes, and docs say so out loud.
+- The SPLIT is method-dependent, the TOTAL is not. Per-transaction
+  rows always sum to lifetime position P&L (proceeds + final mark −
+  cost) — the same figure `dit pnl` reports full-history. Unit test
+  + §24 of the e2e pin a multi-lot fixture where the views must
+  DISAGREE per row (FIFO +54.00 vs average +48.00) and AGREE in
+  total (+57.00), verified by `scripts/txpnl-recon.sh`.
+- Fees now live inside lot cost (buy fee joins the lot; event fees
+  net out), matching the cost-pool rules they replaced.
+- Live-store check: six multi-lot positions now show per-buy rows
+  (TSFA MSFT.TO three separate buys); lifetime totals identical to
+  the average-cost run, so attribution changed the view, not the math.
+
+203→204 unit checks, 370→381 e2e checks (§24, dual-engine included).

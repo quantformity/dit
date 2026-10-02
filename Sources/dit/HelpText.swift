@@ -152,10 +152,13 @@ func helpText(for invocation: Invocation) -> String {
           dit tx show <id>                    one transaction, in full
           dit tx pnl [--account A] [--ticker SYM]
                                     per-transaction P&L: booked events
-                                    (sales at their time-of-sale cost,
-                                    dividends, GIC redemptions) plus
-                                    open-position marks, average cost.
-                                    Offline; --json gives tx-pnl/1.
+                                    (sales against the FIFO lots they
+                                    consumed) plus per-buy unrealized
+                                    marks. Attribution only — the
+                                    ledger's own accounting stays
+                                    average cost, and lifetime totals
+                                    reconcile with 'dit pnl'. Offline;
+                                    --json gives tx-pnl/1.
           dit tx deposit  --account A --amount N [options]
           dit tx withdraw --account A --amount N [options]
           dit tx buy|sell --account A --ticker SYM --shares N

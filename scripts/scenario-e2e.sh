@@ -687,6 +687,28 @@ expect_ok_match   "update: empty store = quiet success, no fetch" "Nothing to up
 expect_fail_match "update: --json has no schema (usage error)"    2 "not supported"     upd --offline --json update
 
 echo
+echo "-- 24. tx pnl — FIFO lot attribution (multi-lot) --"
+# One symbol, TWO buys at different prices, one sale spanning both.
+# Attribution per transaction is FIFO (the ledger's own accounting is
+# average cost); the section pins that the SLICES differ while the
+# lifetime TOTAL agrees with the window engine (dual-engine RECON).
+P3="$WORKDIR/lot-store"
+mkdir -p "$P3/store" "$P3/market"
+lots() { env DIT_BACKEND=file DIT_STORE_URL="$P3/store" DIT_MARKET_URL="$P3/market" "$DIT" "$@"; }
+expect_ok "lots: bootstrap account"          lots account add --currency USD --name "Lot One"
+expect_ok "lots: register MULTI"             lots ticker add MULTI --currency USD
+expect_ok "lots: buy 10 @ 5 (lot 1)"         lots tx buy --account "Lot One" --ticker MULTI --shares 10 --price 5 --date 2026-06-10
+expect_ok "lots: buy 5 @ 8 (lot 2)"          lots tx buy --account "Lot One" --ticker MULTI --shares 5 --price 8 --date 2026-07-01
+printf 'MULTI,2026-07-25,9.00\n' > "$WORKDIR/lot-closes.csv"
+expect_ok "lots: seed a closing series"      lots market import "$WORKDIR/lot-closes.csv"
+expect_ok "lots: sell 12 @ 10 (spans both lots)" lots tx sell --account "Lot One" --ticker MULTI --shares 12 --price 10 --date 2026-07-20
+expect_ok_match "lots: the sale names BOTH consumed buys" "from 2 buys" lots tx pnl
+expect_ok_match "lots: sale books FIFO +54.00, not the average-cost +48.00 slice" "\+54\.00" lots tx pnl
+expect_ok_match "lots: open row is PER BUY: 3 of 5 sh, +3.00 (not one 3-share position)" "3 of 5 sh" lots tx pnl
+expect_ok_match "lots: lifetime total +57.00 — same as the average-cost engines' total" "\+57\.00" lots tx pnl
+expect_ok_match "lots: dual-engine totals reconcile" RECON_OK bash "$(dirname "$0")/txpnl-recon.sh" "$DIT" "$P3/store" "$P3/market"
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"

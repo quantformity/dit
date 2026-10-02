@@ -68,7 +68,7 @@ func txTradePnL(_ args: [String], global: Global) async throws {
     }
 
     let asOfText = TextFormat.day(report.asOf)
-    print("Trade P&L — lifetime ledger view, average cost (open marks: last stored close on/before \(asOfText))")
+    print("Trade P&L — lifetime per-transaction view, FIFO lot attribution (open marks: last stored close on/before \(asOfText))")
     print("Scope: \(scope) — amounts are NATIVE currency, never mixed or summed across currencies")
     if report.isEmpty {
         print("No booked P&L and no open positions — nothing to report.")
@@ -89,9 +89,10 @@ func txTradePnL(_ args: [String], global: Global) async throws {
     }
     if !report.open.isEmpty {
         print("")
-        print("Open positions (unrealized at last stored close — dashes are withheld, never zero):")
+        print("Open — per buy (unrealized at last stored close — dashes are withheld, never zero):")
         print(Table.render(
-            headers: ["Account", "Symbol", "Ccy", "Shares", "Cost", "Last close", "Unrealized"],
+            headers: ["Bought", "Account", "Symbol", "Ccy", "Still held", "Cost left",
+                      "Last close", "Unrealized", "Tx"],
             rows: report.open.map { row in
                 let markText: String
                 if let mark = row.mark, let day = row.markDay {
@@ -100,11 +101,14 @@ func txTradePnL(_ args: [String], global: Global) async throws {
                     markText = "NO MARK (no stored close)"
                 }
                 let marker = row.derived ? "*" : ""
-                return [row.accountName, row.symbol, row.currency.rawValue,
-                 TextFormat.quantity(row.shares) + " sh", TextFormat.money(row.cost), markText,
-                 signedPnL(row.unrealized, marker: marker)]
+                return [TextFormat.day(row.buyDate), row.accountName, row.symbol,
+                        row.currency.rawValue,
+                        "\(TextFormat.quantity(row.heldShares)) of \(TextFormat.quantity(row.boughtShares)) sh",
+                        TextFormat.money(row.cost), markText,
+                        signedPnL(row.unrealized, marker: marker),
+                        String(row.txID.uuidString.prefix(8))]
             },
-            leftColumns: [0, 1]).joined(separator: "\n"))
+            leftColumns: [0, 1, 2, 4, 8]).joined(separator: "\n"))
     }
 
     print("")
@@ -162,9 +166,12 @@ private func tradePnLJSON(report: TradePnLReport, scope: String,
     for row in report.open {
         open.append([
             "account": row.accountName,
+            "id": row.txID.uuidString,
+            "date": TextFormat.day(row.buyDate),
             "symbol": row.symbol,
             "currency": row.currency.rawValue,
-            "shares": TextFormat.plainQuantity(row.shares),
+            "bought": TextFormat.plainQuantity(row.boughtShares),
+            "held": TextFormat.plainQuantity(row.heldShares),
             "cost": TextFormat.fixed(row.cost, scale: 2),
             "mark": row.mark.map { TextFormat.fixed($0, scale: 4) } ?? NSNull(),
             "markDay": row.markDay.map { TextFormat.day($0) } ?? NSNull(),
@@ -184,7 +191,7 @@ private func tradePnLJSON(report: TradePnLReport, scope: String,
     return [
         "asOf": TextFormat.day(report.asOf),
         "scope": scope,
-        "policy": "average-cost",
+        "policy": "fifo-lots",
         "booked": booked,
         "open": open,
         "currencyTotals": totals,

@@ -497,18 +497,20 @@ valuations — there are no amounts in this document at all.
 
 ## `tx-pnl/1` — `dit --json tx pnl [--account A] [--ticker SYM]`
 
-Transaction-level P&L, lifetime, average cost, native currencies. The
-same ledger facts `dit pnl` aggregates, sliced per transaction.
+Transaction-level P&L, lifetime, FIFO lot attribution, native
+currencies. The same ledger facts `dit pnl` aggregates, sliced per
+transaction; the ledger's own accounting stays average cost.
 
 ```json
 {"ok":true,"schema":"tx-pnl/1","data":{
-  "asOf":"2026-10-02","policy":"average-cost","scope":"all accounts",
+  "asOf":"2026-10-02","policy":"fifo-lots","scope":"all accounts",
   "booked":[{"account":"P&L One","currency":"USD","date":"2026-07-10",
     "detail":"5 sh @ 8 − cost 25.00","id":"4C54C9E2-…","incomplete":false,
     "kind":"sell","pnl":"15.00","symbol":"WIDE"}],
-  "open":[{"account":"P&L One","cost":"25.00","currency":"USD",
-    "mark":"8","markDay":"2026-07-31","markKind":"stored",
-    "shares":"5","symbol":"WIDE","unrealized":"15.00"}],
+  "open":[{"account":"P&L One","bought":"10","cost":"25.00",
+    "currency":"USD","date":"2026-06-10","held":"5",
+    "id":"B0B1C2D3-…","mark":"8","markDay":"2026-07-31",
+    "markKind":"stored","symbol":"WIDE","unrealized":"15.00"}],
   "currencyTotals":[{"booked":"22.00","currency":"USD",
     "open":"15.00","total":"37.00"}],
   "notes":[]}}
@@ -518,10 +520,15 @@ same ledger facts `dit pnl` aggregates, sliced per transaction.
   `gic-redemption`. All amounts are NATIVE (this view never converts)
   and `pnl` already nets fees. `incomplete: true` marks an untracked
   short — its currency total is then withheld (`"total": null`).
-- `open` rows carry `mark`/`markDay`/`markKind` (`"stored"`,
-  `"derived"`, or `null`) — `markKind: null` with `"unrealized": null`
-  means NO usable close existed: a dash, not a zero. A null unrealized
-  withholds the whole currency total (whole-or-nothing, like `pnl/1`).
+- `open` rows are PER BUY (FIFO lots), chronological by purchase
+  date: `bought`/`held` show remaining shares of that buy, `cost` is
+  the remaining cost basis of the HELD shares. `markKind: null` with
+  `"unrealized": null` means NO usable close existed for that symbol:
+  a dash, not a zero — and it withholds the whole currency total
+  (whole-or-nothing, like `pnl/1`).
+- `policy: "fifo-lots"` is ATTRIBUTION, not accounting — the ledger
+  and `pnl/1` keep average cost. Per-event slices may differ between
+  the two views; lifetime totals agree within regrouping dust.
 - Summing `currencyTotals` per currency reconciles with a full-history
   `pnl/1` run over the same scope (within regrouping dust), EXCEPT
   when an unmeasurable quiet position exists: this view then refuses

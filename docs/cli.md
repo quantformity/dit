@@ -214,20 +214,25 @@ be theater. The `--kind`/`--ticker`-style lookups above are unaffected.
 
 ### `dit tx pnl` — transaction-level P&L
 
-A lifetime ledger view at average cost, built from stored data only
+A lifetime view, one row per transaction, built from stored data only
 (never the network; no account/ticker is skipped for being quiet).
-Two row kinds, never conflated:
+Numbers are TRANSACTION ATTRIBUTIONS under FIFO lot matching — each
+buy is a lot, and a sale realizes against the oldest lots it consumed
+(a sale's detail names the buys it drew from). Two row kinds, never
+conflated:
 
 - **Booked at the transaction** — one line per SELL, DIVIDEND, or GIC
-  REDEMPTION with the P&L it booked AT BOOKING TIME. A sale's gain is
-  measured against the average cost standing at that date (fees join
-  the cost pool on buys and net out on events), so the rows reconcile
-  with `dit pnl` for the same scope by construction.
-- **Open positions** — unrealized P&L per account × symbol at the
-  last stored close on/before today (`*` marks a derived proxy).
-  Average cost cannot honestly split an open position back into the
-  individual buys that formed it, so positions get one row, not per-
-  trade guesses.
+  REDEMPTION with the P&L it booked AT BOOKING TIME. Fees join lot
+  cost on buys and net out on events.
+- **Open — per buy** — unrealized P&L for each still-open BUY at the
+  last stored close on/before today (`*` marks a derived proxy),
+  showing `held of bought` shares so partial sales stay visible.
+
+Attribution is not accounting: the ledger's own books (and `dit pnl`)
+stay average-cost, so a multi-lot slice may read differently here —
+but the lifetime TOTALS agree with `dit pnl` for the same scope
+(pinned by tests and `scripts/txpnl-recon.sh`). If they ever differ,
+one view is wrong — report it, don't average them.
 
 A dash is a fact: an unmarkable position shows `NO MARK` and WITHHOLDS
 its currency total instead of printing a half-truth. Oversold sales
