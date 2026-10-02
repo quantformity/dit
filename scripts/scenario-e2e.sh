@@ -453,7 +453,7 @@ expect_fail_match "pnl: positional argument refused"          2 "unexpected"    
 # check runs the SAME ledger through BOTH engines (tx-pnl/1 vs pnl/1)
 # and refuses any half-cent disagreement — two views, one truth.
 expect_ok_match "txpnl: booked + open sections print" "Booked at the transaction" pnl tx pnl
-expect_ok_match "txpnl: hand-checked total +37.00 USD" "total \+37\.00"          pnl tx pnl
+expect_ok_match "txpnl: hand-checked total +37.00 USD" "USD.*\+22\.00.*\+15\.00.*\+37\.00"          pnl tx pnl
 expect_ok_match "txpnl: --json emits one tx-pnl/1 document" '"schema":"tx-pnl/1"' pnl --json tx pnl
 expect_ok_match "txpnl: sums reconcile with the window engine" RECON_OK bash "$(dirname "$0")/txpnl-recon.sh" "$DIT" "$PD/store" "$PD/market"
 expect_fail_match "txpnl: --json on plain tx list stays refused" 2 "not supported for 'tx list'" pnl --json tx list
@@ -476,7 +476,7 @@ expect_ok_match "pnl2: total withheld, not faked" "Total \(CAD\): —"  pnl2 pnl
 expect_ok_match "pnl2: USD reporting still prints 22.00 exactly" "22\.00" pnl2 pnl --reporting-ccy USD --from 2026-07-01 --to 2026-07-31
 expect_ok_match "pnl2: tx pnl dashes the unmeasurable too" "NO MARK" pnl2 tx pnl
 expect_ok_match "pnl2: …and withholds the USD total instead of faking one" "withheld — incomplete by design" pnl2 tx pnl
-expect_ok_match "pnl2: the booked half is still exact" "booked \+22\.00 · open —" pnl2 tx pnl
+expect_ok_match "pnl2: the booked half is still exact" "USD.*\+22\.00.*—" pnl2 tx pnl
 # Mixed store: USD amounts inside a CAD account — every figure STILL
 # speaks CAD (the From column names each row's ledger currency).
 expect_ok "pnl: add a CAD account"           pnl account add --currency CAD --name "P&L Two"

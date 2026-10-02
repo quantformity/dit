@@ -16,13 +16,6 @@ func signedPnL(_ amount: Decimal?, marker: String = "") -> String {
     return "\(sign)\(text)\(marker)"
 }
 
-/// Fixed-width column text (truncation is never silent: cut values
-/// keep a trailing "…" so a narrow column cannot fake a short name).
-func padColumn(_ text: String, _ width: Int) -> String {
-    if text.count <= width { return text.padding(toLength: width + 1, withPad: " ", startingAt: 0) }
-    return String(text.prefix(width - 1)) + "… "
-}
-
 func txTradePnL(_ args: [String], global: Global) async throws {
     let options = try Options(args, valueOptions: ["account", "ticker"])
     guard options.positionals.isEmpty else {
@@ -85,45 +78,44 @@ func txTradePnL(_ args: [String], global: Global) async throws {
     if !report.booked.isEmpty {
         print("")
         print("Booked at the transaction (realized at the time it booked):")
-        for row in report.booked {
-            let short = String(row.txID.uuidString.prefix(8))
-            print("  " + padColumn(TextFormat.day(row.date), 12)
-                + padColumn(row.accountName, 16)
-                + padColumn(row.kind, 10)
-                + padColumn(row.symbol, 12)
-                + padColumn(row.currency.rawValue, 5)
-                + signedPnL(row.pnl).padding(toLength: 10, withPad: " ", startingAt: 0)
-                + "  " + row.detail + "  [" + short + "]")
-        }
+        print(Table.render(
+            headers: ["Date", "Account", "Kind", "Symbol", "Ccy", "P&L", "Where it came from"],
+            rows: report.booked.map { row in
+                [TextFormat.day(row.date), row.accountName, row.kind, row.symbol,
+                 row.currency.rawValue, signedPnL(row.pnl),
+                 row.detail + "  [" + String(row.txID.uuidString.prefix(8)) + "]"]
+            },
+            leftColumns: [0, 1, 2, 3, 6]).joined(separator: "\n"))
     }
     if !report.open.isEmpty {
         print("")
         print("Open positions (unrealized at last stored close — dashes are withheld, never zero):")
-        for row in report.open {
-            let markText: String
-            if let mark = row.mark, let day = row.markDay {
-                markText = "\(TextFormat.quantity(mark)) (\(TextFormat.day(day)))"
-            } else {
-                markText = "NO MARK (no stored close)"
-            }
-            let marker = row.derived ? "*" : ""
-            print("  " + padColumn(row.accountName, 16)
-                + padColumn(row.symbol, 12)
-                + padColumn(row.currency.rawValue, 5)
-                + padColumn(TextFormat.quantity(row.shares) + " sh", 12)
-                + padColumn("cost " + TextFormat.money(row.cost), 16)
-                + padColumn(markText, 26)
-                + signedPnL(row.unrealized, marker: marker))
-        }
+        print(Table.render(
+            headers: ["Account", "Symbol", "Ccy", "Shares", "Cost", "Last close", "Unrealized"],
+            rows: report.open.map { row in
+                let markText: String
+                if let mark = row.mark, let day = row.markDay {
+                    markText = "\(TextFormat.quantity(mark)) (\(TextFormat.day(day)))"
+                } else {
+                    markText = "NO MARK (no stored close)"
+                }
+                let marker = row.derived ? "*" : ""
+                return [row.accountName, row.symbol, row.currency.rawValue,
+                 TextFormat.quantity(row.shares) + " sh", TextFormat.money(row.cost), markText,
+                 signedPnL(row.unrealized, marker: marker)]
+            },
+            leftColumns: [0, 1]).joined(separator: "\n"))
     }
 
     print("")
-    print("Totals per currency (native units):")
-    for total in report.perCurrency {
-        print("  \(total.currency.rawValue): booked \(signedPnL(total.booked))"
-            + " · open \(signedPnL(total.open)) · total \(signedPnL(total.total))"
-            + (total.total == nil ? "  [withheld — incomplete by design]" : ""))
-    }
+    print("Totals per currency (native units; a DASH total is withheld by design, never a fake zero):")
+    print(Table.render(
+        headers: ["Ccy", "Booked", "Open", "Total"],
+        rows: report.perCurrency.map { total in
+            [total.currency.rawValue, signedPnL(total.booked), signedPnL(total.open),
+             signedPnL(total.total) + (total.total == nil ? " [withheld — incomplete by design]" : "")]
+        },
+        leftColumns: [0]).joined(separator: "\n"))
     let allNotes = notes + report.notes
     if !allNotes.isEmpty {
         print("")
