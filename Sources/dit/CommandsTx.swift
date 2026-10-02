@@ -18,6 +18,8 @@ func txCommand(_ sub: String, _ args: [String], global: Global) async throws {
     switch sub {
     case "list", "ls":
         try await txList(args, global: global)
+    case "pnl":
+        try await txTradePnL(args, global: global)
     case "show":
         try await txShow(args, global: global)
     case "deposit":

@@ -845,3 +845,39 @@ pre-network quiet path — the script stays network-free by design);
 verified live against a throwaway fixture: latest AAPL + USD/CAD
 snapshots and 47 daily points (AAPL 23 + USD/CAD 24, holding windows
 from Sep 1) stored by one `dit update`. 195 unit + 357/357 e2e.
+
+## Entry 23 — 2026-10-02 — `dit tx pnl`: transaction-level P&L (dual-engine)
+
+Users asked "which transaction earned what?" — finer than `dit pnl`'
+symbol rows. Built as a SECOND VIEW of the same ledger, deliberately
+not a second financial model:
+
+- `DitCore/TradePnL.swift` copies the window engine's average-cost
+  rules literally (fees join the cost pool on buys, full liquidation
+  removes cost exactly, redemption-without-purchase skips loudly,
+  oversold = untracked short). Realized-at-event rows are exact
+  ledger facts; open positions get ONE unrealized row per
+  account × symbol at the last stored close — average cost genuinely
+  cannot split an open position back into its buys, and per-lot marks
+  would be fabricated numbers, so the view refuses them.
+- The reconciliation contract is pinned by a test AND an e2e helper
+  (`scripts/txpnl-recon.sh`): per currency, Σ(tx-pnl rows) must equal
+  the full-history `pnl/1` total within regrouping dust.
+- One honest asymmetry, documented and tested: with an unmeasurable
+  quiet position the window view footnotes and sums anyway;
+  `tx pnl` shows the dashed position and WITHHOLDS the total.
+  Stricter than the window view is allowed; looser is a bug.
+- A hand-built test window once "proved" the engines disagreed — the
+  engines were right, the window was wrong (mid-day timestamps shift
+  the replay boundary; `resolveWindow` normalizes to UTC days). The
+  test now goes through the production resolver for that reason.
+- CLI (`Sources/dit/CommandsTxPnL.swift`) is a thin shell: scope
+  flags only (`--account`, `--ticker`), native amounts only, dashes
+  for unknowns, `tx-pnl/1` for `--json` (whitelisted; `tx list`
+  still refuses). Dashed-withheld totals print as
+  `[withheld — incomplete by design]`, never as 0.00.
+
+195→203 unit checks (TradePnLTests: hand-computed ledgers, fee
+routing, foreign-currency series rejected, both reconciliation modes);
+357→370 e2e checks in §22 (dual-engine RECON_OK, dashes, withheld
+totals, usage-error discipline).

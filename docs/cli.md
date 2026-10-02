@@ -179,6 +179,7 @@ dates are strict `YYYY-MM-DD`.
 ```
 dit tx list [filters]               # transactions (all accounts)
 dit tx show <id>                    # one transaction, in full
+dit tx pnl [--account A] [--ticker SYM]   # transaction-level P&L (offline)
 dit tx deposit   --account A --amount N [options]
 dit tx withdraw  --account A --amount N [--currency CCY] [options]
 dit tx buy     --account A --ticker SYM --shares N [--price P] [options]
@@ -210,6 +211,32 @@ the plain list, because running balances over a filtered subset would
 be theater. The `--kind`/`--ticker`-style lookups above are unaffected.
 
 `<id>` is the ID column of `dit tx list`; 8 hex chars are usually unique.
+
+### `dit tx pnl` — transaction-level P&L
+
+A lifetime ledger view at average cost, built from stored data only
+(never the network; no account/ticker is skipped for being quiet).
+Two row kinds, never conflated:
+
+- **Booked at the transaction** — one line per SELL, DIVIDEND, or GIC
+  REDEMPTION with the P&L it booked AT BOOKING TIME. A sale's gain is
+  measured against the average cost standing at that date (fees join
+  the cost pool on buys and net out on events), so the rows reconcile
+  with `dit pnl` for the same scope by construction.
+- **Open positions** — unrealized P&L per account × symbol at the
+  last stored close on/before today (`*` marks a derived proxy).
+  Average cost cannot honestly split an open position back into the
+  individual buys that formed it, so positions get one row, not per-
+  trade guesses.
+
+A dash is a fact: an unmarkable position shows `NO MARK` and WITHHOLDS
+its currency total instead of printing a half-truth. Oversold sales
+(untracked shorts) and redemptions without a recorded purchase are
+named in the notes, never silently netted. Amounts stay NATIVE — this
+view never converts and never adds across currencies; `--account` and
+`--ticker` narrow the scope (a filter matching nothing says so, it
+does not widen back to "all"). `--json` emits `tx-pnl/1`
+(see docs/json.md).
 
 ### Buy/sell without `--price`
 
