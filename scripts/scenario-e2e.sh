@@ -446,6 +446,19 @@ expect_fail_match "pnl: reversed dates refused, not swapped"  2 "before"        
 expect_fail_match "pnl: bad date is a usage error"            2 "date"           pnl pnl --from 2026-02-30
 expect_fail_match "pnl: unknown account errors (not 'all')"   1 "no account matches" pnl pnl --account NOPE
 expect_fail_match "pnl: positional argument refused"          2 "unexpected"     pnl pnl USD
+# --- tx pnl: transaction-level attribution (dual-engine §) ---
+# Same fixture, second view: per-transaction booked rows + open-position
+# marks. Pinned by hand: 40 − 25 = +15.00 booked at the sale, +7.00
+# dividend, 5 × 8 − 25 = +15.00 open → +37.00 USD total. The recon
+# check runs the SAME ledger through BOTH engines (tx-pnl/1 vs pnl/1)
+# and refuses any half-cent disagreement — two views, one truth.
+expect_ok_match "txpnl: booked + open sections print" "Booked at the transaction" pnl tx pnl
+expect_ok_match "txpnl: hand-checked total +37.00 USD" "total \+37\.00"          pnl tx pnl
+expect_ok_match "txpnl: --json emits one tx-pnl/1 document" '"schema":"tx-pnl/1"' pnl --json tx pnl
+expect_ok_match "txpnl: sums reconcile with the window engine" RECON_OK bash "$(dirname "$0")/txpnl-recon.sh" "$DIT" "$PD/store" "$PD/market"
+expect_fail_match "txpnl: --json on plain tx list stays refused" 2 "not supported for 'tx list'" pnl --json tx list
+expect_fail_match "txpnl: positional argument refused"     2 "unexpected"                        pnl tx pnl USD
+expect_fail_match "txpnl: unknown account errors (not 'all')" 1 "no account matches"             pnl tx pnl --account NOPE
 # No market data at all: a position that CROSSES the window boundary
 # cannot have its drift measured, and USD cannot honestly be shown as
 # CAD — the reporting view DASHES both and declares why. A dash is a
@@ -461,6 +474,9 @@ expect_ok "pnl2: dividend inside window"     pnl2 tx dividend --account "P&L One
 expect_ok_match "pnl2: no FX history = no CAD figures, declared" "no stored FX history" pnl2 pnl --from 2026-07-01 --to 2026-07-31
 expect_ok_match "pnl2: total withheld, not faked" "Total \(CAD\): —"  pnl2 pnl --from 2026-07-01 --to 2026-07-31
 expect_ok_match "pnl2: USD reporting still prints 22.00 exactly" "22\.00" pnl2 pnl --reporting-ccy USD --from 2026-07-01 --to 2026-07-31
+expect_ok_match "pnl2: tx pnl dashes the unmeasurable too" "NO MARK" pnl2 tx pnl
+expect_ok_match "pnl2: …and withholds the USD total instead of faking one" "withheld — incomplete by design" pnl2 tx pnl
+expect_ok_match "pnl2: the booked half is still exact" "booked \+22\.00 · open —" pnl2 tx pnl
 # Mixed store: USD amounts inside a CAD account — every figure STILL
 # speaks CAD (the From column names each row's ledger currency).
 expect_ok "pnl: add a CAD account"           pnl account add --currency CAD --name "P&L Two"

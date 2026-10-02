@@ -186,7 +186,7 @@ enum Main {
             switch (invocation.group, invocation.sub) {
             case ("", _), ("summary", _), ("accounts", _), ("account", nil),
                  ("account", "list"), ("account", "show"), ("quote", _), ("pnl", _),
-                 ("market", "coverage"):
+                 ("market", "coverage"), ("tx", "pnl"):
                 break
             default:
                 let command = ([invocation.group, invocation.sub].compactMap { $0 }
@@ -195,7 +195,7 @@ enum Main {
                     : ([invocation.group, invocation.sub].compactMap { $0 }
                         .filter { !$0.isEmpty }.joined(separator: " "))
                 throw ParseError("--json is not supported for '\(command)' — "
-                    + "documented schemas: summary, accounts, account show, quote, pnl, market coverage (see docs/json.md)")
+                    + "documented schemas: summary, accounts, account show, quote, pnl, market coverage, tx pnl (see docs/json.md)")
             }
         }
         switch (invocation.group, invocation.sub) {

@@ -50,6 +50,7 @@ no tables — even on errors.
 | `dit --json quote SYM… [--as-of DATE \| --from DATE --to DATE]` | `quote/1` (live / store / series) |
 | `dit --json quote CCY/CCY/CCY[/…] [--as-of DATE]` | `quote/1` (`"mode":"matrix"`) |
 | `dit --json pnl [window/filter options]` | `pnl/1` |
+| `dit --json tx pnl [--account A] [--ticker SYM]` | `tx-pnl/1` |
 | `dit --json market coverage [window/filter options]` | `coverage/1` |
 
 Everything else refuses. `--json` takes no value (`--json=1` is a
@@ -493,6 +494,41 @@ valuations — there are no amounts in this document at all.
   makes it flip the exit code (0 → 1) but never the document shape.
 - Keys sort alphabetically like every document; the two stream rules
   above apply. `dit-chart` refuses `coverage/1` (no chart defined).
+
+## `tx-pnl/1` — `dit --json tx pnl [--account A] [--ticker SYM]`
+
+Transaction-level P&L, lifetime, average cost, native currencies. The
+same ledger facts `dit pnl` aggregates, sliced per transaction.
+
+```json
+{"ok":true,"schema":"tx-pnl/1","data":{
+  "asOf":"2026-10-02","policy":"average-cost","scope":"all accounts",
+  "booked":[{"account":"P&L One","currency":"USD","date":"2026-07-10",
+    "detail":"5 sh @ 8 − cost 25.00","id":"4C54C9E2-…","incomplete":false,
+    "kind":"sell","pnl":"15.00","symbol":"WIDE"}],
+  "open":[{"account":"P&L One","cost":"25.00","currency":"USD",
+    "mark":"8","markDay":"2026-07-31","markKind":"stored",
+    "shares":"5","symbol":"WIDE","unrealized":"15.00"}],
+  "currencyTotals":[{"booked":"22.00","currency":"USD",
+    "open":"15.00","total":"37.00"}],
+  "notes":[]}}
+```
+
+- `booked` rows are chronological; `kind` is `sell`, `dividend`, or
+  `gic-redemption`. All amounts are NATIVE (this view never converts)
+  and `pnl` already nets fees. `incomplete: true` marks an untracked
+  short — its currency total is then withheld (`"total": null`).
+- `open` rows carry `mark`/`markDay`/`markKind` (`"stored"`,
+  `"derived"`, or `null`) — `markKind: null` with `"unrealized": null`
+  means NO usable close existed: a dash, not a zero. A null unrealized
+  withholds the whole currency total (whole-or-nothing, like `pnl/1`).
+- Summing `currencyTotals` per currency reconciles with a full-history
+  `pnl/1` run over the same scope (within regrouping dust), EXCEPT
+  when an unmeasurable quiet position exists: this view then refuses
+  the total while `pnl/1` footnotes its omission. Stricter here,
+  never looser.
+- A missing portfolio emits the `"empty": true` envelope with the
+  store path (same shape as the other schemas).
 
 ## Scripting notes
 
