@@ -183,6 +183,9 @@ public enum ChartHTML {
     }
 
     /// "Nice" gridline step (1/2/2.5/5 × 10^n) at or above `raw`.
+    ///
+    /// - Returns: the smallest ladder step at or above `raw`, or 1 for
+    ///   non-positive input (a zero-range chart still draws).
     private static func niceStep(_ raw: Double) -> Double {
         guard raw > 0 else { return 1 }
         let magnitude = pow(10, floor(log10(raw)))
@@ -192,8 +195,12 @@ public enum ChartHTML {
         return 10 * magnitude
     }
 
-    /// Axis tick labels are display abbreviations ($150K style), like
-    /// the reference dashboard; the EXACT figures stay in the tooltips.
+    /// Format one axis tick label.
+    ///
+    /// Tick labels are display abbreviations ($150K style), like the
+    /// reference dashboard; the EXACT figures stay in the tooltips.
+    ///
+    /// - Returns: a `$`-prefixed abbreviation (`$1.2M`, `$-2K`, `$40`).
     private static func tickLabel(_ value: Double) -> String {
         let magnitude = abs(value)
         let sign = value < 0 ? "-" : ""

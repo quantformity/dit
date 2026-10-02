@@ -104,10 +104,20 @@ public enum ChartRenderer {
     /// how charts start lying.
     public static let chartableSchemas: Set<String> = ["summary/1"]
 
-    /// Parse a `--json` document into charts. Throws ``ChartError/notJSON``
-    /// on malformed input, ``ChartError/rejected(_:)`` on `"ok":false`
-    /// (carrying the source's message), and ``ChartError/unsupported(_:)``
-    /// on unknown/missing schemas.
+    /// Parse a `--json` document into header lines and charts.
+    ///
+    /// Unknown or missing schemas are refused, never "plotted as
+    /// generic bars"; a failed source document (`"ok":false`) travels
+    /// its own message instead of being rendered.
+    ///
+    /// - Parameters:
+    ///   - data: the raw document (typically the whole stdin).
+    /// - Returns: header lines (drawn above the charts) and the
+    ///   charts in draw order.
+    /// - Throws: ``ChartError/notJSON`` on malformed input,
+    ///   ``ChartError/rejected(_:)`` on `"ok":false` documents
+    ///   (carrying the source's message), and
+    ///   ``ChartError/unsupported(_:)`` on unknown/missing schemas.
     public static func charts(fromJSON data: Data) throws -> (header: [String], charts: [Chart]) {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ChartError.notJSON
@@ -246,6 +256,11 @@ public enum ChartRenderer {
 
     /// Decimal-exact rounding for display strings (no binary float in
     /// the money path).
+    ///
+    /// - Parameters:
+    ///   - value: the amount to round.
+    ///   - places: decimal places to keep.
+    /// - Returns: `value` rounded `.plain` to `places`.
     static func roundToPlaces(_ value: Decimal, _ places: Int) -> Decimal {
         let handler = NSDecimalNumberHandler(roundingMode: .plain, scale: Int16(places),
                                               raiseOnExactness: false, raiseOnOverflow: false,
@@ -254,6 +269,13 @@ public enum ChartRenderer {
     }
 
     /// Draw several charts one after another (each fully rendered).
+    ///
+    /// - Parameters:
+    ///   - charts: the charts, in draw order; charts whose rows are
+    ///     all unknown draw nothing (nothing honest could be shown).
+    ///   - width: total drawing width in characters, clamped to ≥ 40.
+    ///   - ascii: true forces the plain glyph tier (# ^ ?).
+    /// - Returns: the finished text lines.
     public static func render(charts: [Chart], width: Int, ascii: Bool) -> [String] {
         var lines: [String] = []
         for chart in charts {
@@ -264,10 +286,21 @@ public enum ChartRenderer {
         return lines
     }
 
-    /// One chart: title, optional note, aligned rows, and — for signed
-    /// charts — a zero line at equal scale on both sides. Rows are
-    /// ranked by size; anything past the cap folds into a counted
-    /// remainder line instead of a wall of one-block bars.
+    /// Draw one chart: title, optional note, aligned rows, and — for
+    /// signed charts — a zero line at equal scale on both sides.
+    ///
+    /// Rows are ranked by size; anything past the cap folds into a
+    /// counted remainder line instead of a wall of one-block bars.
+    /// Unknown values stay visible as dashed rows, never silently
+    /// dropped, and legend lines only print when their marker is
+    /// actually on screen.
+    ///
+    /// - Parameters:
+    ///   - chart: the chart to draw.
+    ///   - width: drawing width in characters; too-narrow charts keep
+    ///     their numbers but draw no bars (an honest fallback).
+    ///   - ascii: true forces the plain glyph tier (# ^ ?).
+    /// - Returns: the chart's lines (title, rows, axis, legend).
     public static func render(chart: Chart, width: Int, ascii: Bool) -> [String] {
         var lines: [String] = [chart.title]
         if let note = chart.note { lines.append("  (\(note))") }
@@ -385,9 +418,11 @@ public enum ChartRenderer {
 
     // MARK: Formatting helpers
 
-    /// Money exactly as the summary tables speak it: grouped, 2 places,
-    /// Decimal-exact rounding (display stays display — no binary
-    /// float in the money path).
+    /// Format money exactly as the summary tables speak it.
+    ///
+    /// - Returns: `value` grouped with thousands separators at two
+    ///   decimal places, Decimal-exact rounding (display stays
+    ///   display — no binary float in the money path).
     static func moneyLabel(_ value: Decimal) -> String {
         let rounded = roundToPlaces(value, 2)
         let negative = rounded < 0
