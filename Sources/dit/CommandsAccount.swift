@@ -58,21 +58,34 @@ func accountShow(_ args: [String], global: Global) async throws {
     if let notes = account.notes { print("  Notes:     \(notes)") }
 
     print("\nBalances (offline derivation: positions at cost basis, no FX applied):")
-    let cash = balances.cashByCurrency.sorted { $0.key < $1.key }.map { money($0.value, $0.key) }
-    print("  Cash:        \(cash.isEmpty ? "—" : cash.joined(separator: ", "))")
-    let gics = balances.gicValueByCurrency.sorted { $0.key < $1.key }
-        .map { "\(money($0.value, $0.key)) at par" }
-    print("  GICs:        \(gics.isEmpty ? "—" : gics.joined(separator: ", "))")
-    let dividends = balances.dividendsByCurrency.sorted { $0.key < $1.key }.map { money($0.value, $0.key) }
-    print("  Dividends:   \(dividends.isEmpty ? "—" : dividends.joined(separator: ", "))")
-    print("  Realized PL: \(money(balances.realizedPnL ?? 0, account.reportingCurrency))")
+    // A grid like every other number screen: category rows, native
+    // amounts right-aligned. Multi-currency accounts keep their
+    // amounts PER currency inside one cell — combining units would
+    // lie, and splitting cells per currency would read like separate
+    // sub-accounts.
+    var balanceRows: [[String]] = []
+    func balanceRow(_ label: String, _ values: [String]) {
+        balanceRows.append([label, values.isEmpty ? "—" : values.joined(separator: ", ")])
+    }
+    balanceRow("Cash", balances.cashByCurrency.sorted { $0.key < $1.key }.map { money($0.value, $0.key) })
+    balanceRow("GICs (at par)", balances.gicValueByCurrency.sorted { $0.key < $1.key }
+        .map { money($0.value, $0.key) })
+    balanceRow("Dividends", balances.dividendsByCurrency.sorted { $0.key < $1.key }.map { money($0.value, $0.key) })
+    balanceRow("Realized P&L", [money(balances.realizedPnL ?? 0, account.reportingCurrency)])
+    for line in Table.render(headers: ["Balance", "Amount"], rows: balanceRows, leftColumns: [0]) {
+        print("  \(line)")
+    }
     if balances.positions.isEmpty {
-        print("  Positions:   —")
+        print("\n  Positions: — (no holdings booked to this account)")
     } else {
-        print("  Positions:")
-        for position in balances.positions {
-            print("    \(position.symbol)  \(trim(position.shares)) @ \(trim(position.averageCostPerShare))"
-                + " = \(money(position.costBasis, position.currency)) cost basis")
+        print("\n  Positions (cost basis — no market value applied):")
+        let positionRows = balances.positions.map { position in
+            [position.symbol, trim(position.shares), trim(position.averageCostPerShare),
+             money(position.costBasis, position.currency)]
+        }
+        for line in Table.render(headers: ["Symbol", "Shares", "Cost/Share", "Cost Basis"],
+                                 rows: positionRows, leftColumns: [0]) {
+            print("    \(line)")
         }
     }
 
