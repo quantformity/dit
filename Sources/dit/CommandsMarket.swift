@@ -439,9 +439,34 @@ func marketPortfolio(global: Global) async throws -> Portfolio? {
     return portfolio
 }
 
+/// `dit update`: the one-shot market refresh — latest snapshots for
+/// every held symbol + needed FX pair, then the incremental daily
+/// history fill (the two pieces the user calls "latest" and
+/// "history"). Network work only, so `--offline` refuses it up
+/// front; stray arguments are usage errors, never guessed.
+func updateAll(_ args: [String], global: Global) async throws {
+    guard !global.offline else {
+        throw ParseError("'dit update' downloads prices from the provider — "
+            + "--offline refuses the network (offline mode exists to *avoid* fetching)")
+    }
+    guard args.isEmpty else {
+        throw ParseError("unexpected argument '\(args[0])' — "
+            + "'dit update' takes no options (per-part control lives under 'dit market …')")
+    }
+    // Portfolio checked once for both phases. An empty store is a
+    // quiet success (exit 0 — nothing went wrong; there is just
+    // nothing to refresh prices FOR), and no network call can happen
+    // before this point.
+    let hasPortfolio = (try await marketPortfolio(global: global)) != nil
+    guard hasPortfolio else { return }
+    try await marketLatest(global: global, announceNext: false)
+    print()
+    try await marketHistory([], global: global)
+}
+
 /// `market latest`: refresh the one latest snapshot per held symbol
 /// and needed FX pair (refuses `--offline` — there is nothing to refresh).
-func marketLatest(global: Global) async throws {
+func marketLatest(global: Global, announceNext: Bool = true) async throws {
     guard !global.offline else {
         throw ParseError("'dit market latest' refreshes prices from the provider — "
             + "--offline refuses the network (offline summaries use cost basis)")
@@ -466,7 +491,9 @@ func marketLatest(global: Global) async throws {
         }
     }
     for failure in report.failures { printErr("warning: \(failure)") }
-    print("next: 'dit market history' fills daily closes for every held day")
+    if announceNext {
+        print("next: 'dit market history' fills daily closes for every held day")
+    }
 }
 
 /// `market history`: fill daily closes for the days each symbol was

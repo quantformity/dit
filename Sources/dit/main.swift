@@ -249,6 +249,8 @@ enum Main {
             throw ParseError("usage: dit quote <SYMBOL> [SYMBOL ...] — see 'dit help quote'")
         case ("pnl", _):
             try await pnlCommand(invocation.rest, global: global)
+        case ("update", _):
+            try await updateAll(invocation.rest, global: global)
         case ("market", nil), ("market", "latest"):
             try await marketLatest(global: global)
         case ("market", "history"):

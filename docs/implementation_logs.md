@@ -820,3 +820,28 @@ equal the doc's figures; node --check on the drawing script;
 195 unit tests (three rewritten to assert the payload-level truth —
 shared scale, no-cross bounds, KPI exactness — plus a new no-cards-
 when-empty case); 350/350 e2e debug and release.
+
+## Entry 22 — 2026-10-02 — `dit update`: the one-shot market refresh
+
+User asked for a single command that downloads BOTH the latest quotes
+and the daily history for every ticker. The two halves already
+existed (`market latest`, `market history`); `update` composes them
+(latest first, then incremental history) so the daily routine is one
+line. Kept deliberately thin:
+
+- refuses `--offline` up front (a fetch command that silently did
+  nothing would be the worst kind of quiet success);
+- stray arguments are usage errors, matching the CLI's law;
+- the portfolio is checked ONCE before any network call — an empty
+  store is a quiet exit 0, and no bytes leave the machine when there
+  is nothing held;
+- `--json` has no schema here and says so (exit 2) instead of
+  printing prose into a machine stream;
+- `marketLatest(announceNext:)` lost its "next: …" nag when it runs
+  inside `update` (history follows immediately; "next" would lie).
+
+Tested offline-safe in §23 of the e2e script (refusals + the
+pre-network quiet path — the script stays network-free by design);
+verified live against a throwaway fixture: latest AAPL + USD/CAD
+snapshots and 47 daily points (AAPL 23 + USD/CAD 24, holding windows
+from Sep 1) stored by one `dit update`. 195 unit + 357/357 e2e.

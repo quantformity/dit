@@ -29,6 +29,11 @@ func helpText(for invocation: Invocation) -> String {
           dit market <sub> [args]     market-data store (see: dit market --help)
           dit quote <SYM> [...]      live price lookup (see: dit quote --help)
           dit pnl [options]          historical P&L (see: dit pnl --help)
+          dit update                 refresh market data: latest prices
+                                     + daily closes for every held
+                                     ticker and needed FX pair (needs
+                                     network; = 'market latest' +
+                                     'market history' in one run)
           dit help [command]         help
 
           Global options: --display CCY, --offline, --json, --backend
@@ -447,6 +452,11 @@ func helpText(for invocation: Invocation) -> String {
           dit market <sub> [args]     market-data store (see: dit market --help)
           dit quote <SYM> [...]      live price lookup (see: dit quote --help)
           dit pnl [options]          historical P&L (see: dit pnl --help)
+          dit update                 refresh market data: latest prices
+                                     + daily closes for every held
+                                     ticker and needed FX pair (needs
+                                     network; = 'market latest' +
+                                     'market history' in one run)
           dit help [command]         help
 
           Global options: --display CCY, --offline, --backend file|sqlite,

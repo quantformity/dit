@@ -657,6 +657,20 @@ expect_fail_match "html: bare --open on unknown schema refuses, no file" 1 "no c
 expect_fail_match "html: empty stdin refused, not an empty page" 1 "no JSON on stdin" bash -c   "'$CHART' --html '$H/empty.html' < /dev/null"
 
 echo
+echo "-- 23. dit update — the composite refresh (offline-safe checks only) --"
+# 'dit update' chains 'market latest' + 'market history'. The checks
+# here never touch the network: the two refusals happen before any
+# fetch, and the empty-store path returns before one too. (The
+# fetching path is exercised by hand, never in this script — e2e
+# stays offline.)
+upd() { env DIT_BACKEND=file DIT_STORE_URL="$WORKDIR/updstore" DIT_MARKET_URL="$WORKDIR/updmarket" "$DIT" "$@"; }
+mkdir -p "$WORKDIR/updstore"
+expect_fail_match "update: --offline refuses the composite fetch" 2 "refuses the network" upd --offline update
+expect_fail_match "update: stray options are usage errors"        2 "takes no options"  upd update --all
+expect_ok_match   "update: empty store = quiet success, no fetch" "Nothing to update"   upd update
+expect_fail_match "update: --json has no schema (usage error)"    2 "not supported"     upd --offline --json update
+
+echo
 echo "================================================"
 echo "Scenario: $PASS passed, $FAIL failed"
 echo "Workdir kept for inspection: $WORKDIR"

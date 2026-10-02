@@ -549,6 +549,10 @@ grep -c '#' <(dit --json | dit-chart --ascii)  # quick machine check
 ## Market data — the quote store
 
 ```
+dit update                             # one-shot refresh: 'market latest'
+                                       # then 'market history' for every
+                                       # held ticker + needed FX pairs
+                                       # (needs network; refuses --offline)
 dit market latest                      # refresh latest prices + FX for what you hold
 dit market history [--all|--rebuild]   # fill daily closes (incremental; --all re-verifies, --rebuild erases)
 dit market backfill <target> --from <source> [--ratio R] [--dry-run]
@@ -668,8 +672,7 @@ narrows the price table, `--account` scopes the whole audit, unknown
 flags and reversed windows are usage errors (exit 2).
 
 ```bash
-dit market latest
-dit market history
+dit update                             # latest + daily history, one run
 dit market history --all
 dit market show --symbol RBLX --days 10
 dit market import old-prices.csv
