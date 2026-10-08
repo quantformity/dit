@@ -46,7 +46,11 @@ a `├─┼─┤` rule between every pair of rows, and a `└─┴┘` bottom
 Cells are padded to the widest value, so tables read aligned straight
 off stdout; labels are left-aligned, money stays right-aligned.
 Vertical bars inside data render as broken bars (`¦`) so a value can
-never tear a grid wall. `--json` is unaffected: the machine contract
+never tear a grid wall. Header labels are **bold** when stdout is a
+terminal; padding, borders, and data rows stay unstyled. Piped or
+redirected output stays plain text without ANSI escapes. Set a non-empty
+`NO_COLOR` (e.g. `NO_COLOR=1 dit accounts`) or `TERM=dumb` to disable bold
+headers even in a terminal. `--json` is unaffected: the machine contract
 (docs/json.md) never embeds table syntax, and provenance travels in
 dedicated fields (`via`, `basis`), never in display markers.
 
@@ -549,10 +553,13 @@ grep -c '#' <(dit --json | dit-chart --ascii)  # quick machine check
 ## Market data — the quote store
 
 ```
-dit update                             # one-shot refresh: 'market latest'
-                                       # then 'market history' for every
+dit update                             # one-shot refresh: 'market latest',
+                                       # then a gap-filling 'market history --all',
+                                       # then the coverage audit — for every
                                        # held ticker + needed FX pairs
-                                       # (needs network; refuses --offline)
+                                       # (needs network; refuses --offline).
+                                       # --quick = tail-only history fill;
+                                       # --rebuild erases daily history first
 dit market latest                      # refresh latest prices + FX for what you hold
 dit market history [--all|--rebuild]   # fill daily closes (incremental; --all re-verifies, --rebuild erases)
 dit market backfill <target> --from <source> [--ratio R] [--dry-run]
@@ -672,7 +679,7 @@ narrows the price table, `--account` scopes the whole audit, unknown
 flags and reversed windows are usage errors (exit 2).
 
 ```bash
-dit update                             # latest + daily history, one run
+dit update                             # latest + gap-fill + audit, one run
 dit market history --all
 dit market show --symbol RBLX --days 10
 dit market import old-prices.csv

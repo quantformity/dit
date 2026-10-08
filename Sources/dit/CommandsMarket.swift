@@ -439,21 +439,33 @@ func marketPortfolio(global: Global) async throws -> Portfolio? {
     return portfolio
 }
 
-/// `dit update`: the one-shot market refresh — latest snapshots for
-/// every held symbol + needed FX pair, then the incremental daily
-/// history fill (the two pieces the user calls "latest" and
-/// "history"). Network work only, so `--offline` refuses it up
+/// `dit update`: the one-shot market refresh, in the order that makes
+/// the answer trustworthy — latest snapshots for every held symbol and
+/// needed FX pair, then a daily-history pass that FILLS holes rather
+/// than only topping up the tail, then the coverage audit so anything
+/// still missing or merely approximate is named on screen instead of
+/// quietly priced. Network work only, so `--offline` refuses it up
 /// front; stray arguments are usage errors, never guessed.
+///
+/// Why the history pass re-verifies by default: the incremental mode
+/// trusts the coverage watermark, and a watermark marks a range
+/// *verified* the moment a fetch comes back, even if it returned
+/// almost nothing. A series can therefore sit at two known closes and
+/// still be skipped forever. Re-filling finds those holes and keeps
+/// every stored real close. `--quick` takes the cheap tail-only path;
+/// `--rebuild` erases the daily history and refetches it.
 func updateAll(_ args: [String], global: Global) async throws {
     guard !global.offline else {
         throw ParseError("'dit update' downloads prices from the provider — "
             + "--offline refuses the network (offline mode exists to *avoid* fetching)")
     }
-    guard args.isEmpty else {
-        throw ParseError("unexpected argument '\(args[0])' — "
-            + "'dit update' takes no options (per-part control lives under 'dit market …')")
+    let options = try Options(args, valueOptions: [], flagOptions: ["quick", "rebuild"])
+    guard options.positionals.isEmpty else {
+        throw ParseError("unexpected argument '\(options.positionals[0])' — "
+            + "'dit update' takes only --quick / --rebuild "
+            + "(per-part control lives under 'dit market …')")
     }
-    // Portfolio checked once for both phases. An empty store is a
+    // Portfolio checked once for all three phases. An empty store is a
     // quiet success (exit 0 — nothing went wrong; there is just
     // nothing to refresh prices FOR), and no network call can happen
     // before this point.
@@ -461,7 +473,20 @@ func updateAll(_ args: [String], global: Global) async throws {
     guard hasPortfolio else { return }
     try await marketLatest(global: global, announceNext: false)
     print()
-    try await marketHistory([], global: global)
+    let historyMode: [String]
+    if options.has("rebuild") {
+        historyMode = ["--rebuild"]
+    } else if options.has("quick") {
+        historyMode = []
+    } else {
+        historyMode = ["--all"]
+    }
+    try await marketHistory(historyMode, global: global)
+    // Then state what the store actually knows. A hole that survives
+    // the refetch is reported here, where it can be acted on, rather
+    // than showing up later as an unexplained dash in a P&L report.
+    print()
+    try await marketCoverage([], global: global)
 }
 
 /// `market latest`: refresh the one latest snapshot per held symbol

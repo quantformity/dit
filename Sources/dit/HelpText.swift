@@ -29,11 +29,13 @@ func helpText(for invocation: Invocation) -> String {
           dit market <sub> [args]     market-data store (see: dit market --help)
           dit quote <SYM> [...]      live price lookup (see: dit quote --help)
           dit pnl [options]          historical P&L (see: dit pnl --help)
-          dit update                 refresh market data: latest prices
-                                     + daily closes for every held
-                                     ticker and needed FX pair (needs
-                                     network; = 'market latest' +
-                                     'market history' in one run)
+          dit update                 refresh market data in one pass:
+                                     latest prices, then a gap-filling
+                                     daily-history run, then the
+                                     coverage audit (needs network;
+                                     refuses --offline). --quick takes
+                                     the cheap tail-only history pass,
+                                     --rebuild erases daily history first
           dit help [command]         help
 
           Global options: --display CCY, --offline, --json, --backend
@@ -452,11 +454,13 @@ func helpText(for invocation: Invocation) -> String {
           dit market <sub> [args]     market-data store (see: dit market --help)
           dit quote <SYM> [...]      live price lookup (see: dit quote --help)
           dit pnl [options]          historical P&L (see: dit pnl --help)
-          dit update                 refresh market data: latest prices
-                                     + daily closes for every held
-                                     ticker and needed FX pair (needs
-                                     network; = 'market latest' +
-                                     'market history' in one run)
+          dit update                 refresh market data in one pass:
+                                     latest prices, then a gap-filling
+                                     daily-history run, then the
+                                     coverage audit (needs network;
+                                     refuses --offline). --quick takes
+                                     the cheap tail-only history pass,
+                                     --rebuild erases daily history first
           dit help [command]         help
 
           Global options: --display CCY, --offline, --backend file|sqlite,

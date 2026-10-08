@@ -343,14 +343,74 @@ final class MarketUpdaterTests: XCTestCase {
             .updateHistory(portfolio: portfolio, displayCurrency: .cad,
                            today: utc("2025-05-03"))
         XCTAssertEqual(report2.pointsStored, 2)
-        XCTAssertEqual(report2.seriesFetched, 1)
+        // Two fetches, not one: NVDA's two new closes, plus the
+        // USD→CAD pair. The pair is topped up whenever it does not
+        // reach today — it used to be skipped when its last close
+        // landed within three days, which priced a Monday off the
+        // Friday close with nothing saying so.
+        XCTAssertEqual(report2.seriesFetched, 2)
         let now = try await store.load().series["NVDA"]
         XCTAssertEqual(now?.points.count, storedAfterFirst! + 2)
-        // Fetch range began at the day after the old watermark (May 2).
-        let request = await provider2.lastSeriesRequest
-        XCTAssertEqual(request?.symbol, "NVDA")
+        // NVDA's range began at the day after the old watermark (May 2).
+        let request = await provider2.request(for: "NVDA")
+        XCTAssertNotNil(request, "NVDA must be re-fetched for its two new days")
         XCTAssertEqual(request?.from, utc("2025-05-02"))
         XCTAssertEqual(request?.to, utc("2025-05-03"))
+    }
+
+    func testFXPairTopsUpWheneverItLagsToday() async throws {
+        // Regression: a pair whose last stored close was two days old
+        // used to be treated as "current" and skipped, so a Monday
+        // valuation quietly ran on Friday's rate and coverage still
+        // reported the chain as usable. The pair now refills any time
+        // it does not reach today, and a same-day rerun does no work.
+        let account = Account(reportingCurrency: .usd, name: "All-USD")
+        let portfolio = Portfolio(
+            accounts: [account],
+            transactions: [
+                Transaction(date: utc("2025-04-10"), accountID: account.id, currency: .usd,
+                            kind: .deposit(amount: 100)),
+            ])
+        let store = MarketStore(store: MemoryDataStore())
+
+        func closes(_ from: Date, through: Date, _ rate: Decimal) -> [(String, Decimal)] {
+            var out: [(String, Decimal)] = []
+            var day = from
+            while day <= through {
+                out.append((StubMarketProvider.stamp(day), rate))
+                day = day.addingTimeInterval(86_400)
+            }
+            return out
+        }
+
+        let first = StubMarketProvider()
+        await first.setDaily(["USDCAD=X": closes(utc("2025-04-10"), through: utc("2025-05-01"), 1.40)])
+        _ = try await MarketUpdater(provider: first, store: store)
+            .updateHistory(portfolio: portfolio, displayCurrency: .cad,
+                           today: utc("2025-05-01"))
+        let watermarked = try await store.load().series["USD/CAD"]?.coveredThrough
+        XCTAssertEqual(watermarked, utc("2025-05-01"), "setup: pair marked through May 1")
+
+        // Two days later the vendor knows May 2 and May 3.
+        let later = StubMarketProvider()
+        await later.setDaily(["USDCAD=X": closes(utc("2025-05-02"), through: utc("2025-05-03"), 1.45)])
+        let second = try await MarketUpdater(provider: later, store: store)
+            .updateHistory(portfolio: portfolio, displayCurrency: .cad,
+                           today: utc("2025-05-03"))
+        let request = await later.lastSeriesRequest
+        XCTAssertEqual(request?.symbol, "USDCAD=X",
+                       "a pair that stops short of today must be re-fetched")
+        XCTAssertEqual(request?.from, utc("2025-05-02"))
+        XCTAssertEqual(request?.to, utc("2025-05-03"))
+        XCTAssertEqual(second.pointsStored, 2, "the two missing days are added")
+
+        // Same day again: the pair now reaches today, so nothing fetches.
+        let third = StubMarketProvider()
+        _ = try await MarketUpdater(provider: third, store: store)
+            .updateHistory(portfolio: portfolio, displayCurrency: .cad,
+                           today: utc("2025-05-03"))
+        let rerun = await third.seriesRequestCount
+        XCTAssertEqual(rerun, 0, "a same-day rerun does no FX work")
     }
 
     func testHistoryRebuildRefetchesEverything() async throws {
@@ -503,6 +563,12 @@ extension StubMarketProvider {
     fileprivate var seriesRequestCount: Int { seriesRequests.count }
     fileprivate var seriesRequestSymbols: [String] { seriesRequests.map(\.symbol) }
     fileprivate var lastSeriesRequest: StubMarketProvider.Request? { seriesRequests.last }
+    /// The last request made for one symbol, so a test can name the
+    /// ticker whose range it is checking instead of relying on the
+    /// overall last fetch (FX is fetched after the symbols).
+    fileprivate func request(for symbol: String) -> StubMarketProvider.Request? {
+        seriesRequests.last { $0.symbol == symbol }
+    }
 
     static func stamp(_ date: Date) -> String {
         let formatter = DateFormatter()

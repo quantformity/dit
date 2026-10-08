@@ -845,3 +845,72 @@ pre-network quiet path — the script stays network-free by design);
 verified live against a throwaway fixture: latest AAPL + USD/CAD
 snapshots and 47 daily points (AAPL 23 + USD/CAD 24, holding windows
 from Sep 1) stored by one `dit update`. 195 unit + 357/357 e2e.
+
+## Entry 23 — 2026-10-05 — `dit update` fills gaps and audits, not just the tail
+
+Found while using `dit update` on a live store: it completed in 0.42s
+and reported success while two real holes stayed open. Two separate
+causes, one user-visible symptom ("I refreshed and the report is still
+wrong").
+
+1. **The FX three-day tolerance.** `updateHistory` skipped a currency
+   pair whose newest stored close was within three days of today. On a
+   Monday that prices the whole book off Friday's rate — and coverage
+   still called the chain "usable", so nothing warned. A 3-day USD/CAD
+   drift is ~0.02%, which on a mostly-USD portfolio is a four-figure
+   CAD error moving the wrong way. Replaced with: a pair is current
+   only when it reaches today. A successful-but-empty fetch still
+   advances the watermark, and the skip still fires when the store
+   already has today, so a same-day rerun does no network work.
+
+2. **Watermark-incremental never re-verifies.** `update` ran the
+   history pass in `.incremental`, which trusts the watermark, and a
+   watermark marks a range verified the moment a fetch RETURNS — not
+   when it returns everything. A series can sit on twelve scattered
+   closes and be skipped forever. `update` now runs `.refill`
+   (`market history --all`): re-fetch every holding window, merge, and
+   keep stored real closes. `--quick` keeps the old cheap path;
+   `--rebuild` passes through to `.rebuild`.
+
+`update` also ends with the coverage audit, so the command that fixes
+the data also states what is still missing — the multi-step
+"audit, refresh, refill" routine is one line now.
+
+Proof, same seeded damage, same machine:
+
+| | VRT closes | USD/CAD closes | 3-month P&L |
+|---|---:|---:|---:|
+| old `dit update` | 12 (unchanged) | 455 (unchanged) | 78,766.37 @1.4258 |
+| new `dit update` | 112 | 457 | 78,999.52 @1.4261 |
+
+The old build silently fixed nothing; the new one stored 102 points and
+moved the reported P&L by ~233 CAD by making it reflect real data.
+Cost when the store is already current: ~0.15s, no fetches.
+
+Tests: 195 Swift-Testing + 114 XCTest green (one XCTest rewritten to
+assert FX refills when it lags — its old expectation *was* the bug —
+plus a new same-day-rerun-does-no-work case); 361/361 e2e, four new
+assertions covering the flag surface (`--all` rejected, `--quick` and
+`--rebuild` accepted, stray positional rejected).
+
+## Entry 24 — 2026-10-06 — bold headers for stdout tables
+
+All CLI tables share `Table.render`, so styling belongs there rather
+than at individual command call sites. Header labels get ANSI bold
+only when stdout is a terminal; borders, padding, and data stay plain.
+Widths are measured before adding escape sequences, preserving the
+existing grid and left/right alignment. Piped and redirected output
+has no escapes, and JSON never goes through the table renderer.
+A non-empty `NO_COLOR` or `TERM=dumb` disables terminal styling.
+
+Added seven unit tests for exact plain/bold output, alignment,
+sanitization, empty tables, and terminal/environment policy. The e2e
+suite now runs `scripts/check-table-headers.py` against its synthetic
+coverage fixture: 13 read commands across all table-report families,
+using a real pseudo-terminal and a pipe; every header label is bold,
+non-header lines are unstyled, and stripped tables match plain tables.
+It also checks both opt-outs and valid escape-free JSON on both outputs.
+No real portfolio stores or network access are needed for these checks.
+
+Validation: 114 XCTest + 202 Swift-Testing tests passed; 362/362 e2e
+assertions passed, including the terminal integration checks.

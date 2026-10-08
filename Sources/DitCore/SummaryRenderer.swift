@@ -5,13 +5,18 @@ import Foundation
 /// rows, and `┌ ┬ ┐ ├ ┼ ┤ └ ┴ ┘` frame joints. Cells are padded to
 /// the widest value, so the grid reads aligned straight off stdout.
 /// Vertical bars inside data become broken bars (`¦`) so a value can
-/// never tear a grid wall apart. Deterministic (no locale-dependent
-/// measurement) so the same summary always renders the same way.
+/// never tear a grid wall apart. Measurement is locale-independent;
+/// terminal-only bold headers do not affect column widths.
 public enum Table {
     /// Render a full table — top edge, header row, rule, every data
     /// row with a rule after it (the last one closing as `└─┴─┘`) —
-    /// columns aligned to the widest cell per column.
-    public static func render(headers: [String], rows: [[String]], leftColumns: Set<Int> = [0]) -> [String] {
+    /// columns aligned to the widest cell per column. Header labels are
+    /// bold on stdout terminals, unless NO_COLOR (non-empty) or TERM=dumb
+    /// disables styling. Pass boldHeaders explicitly to override detection.
+    public static func render(
+        headers: [String], rows: [[String]], leftColumns: Set<Int> = [0], boldHeaders: Bool? = nil
+    ) -> [String] {
+        let boldHeaders = boldHeaders ?? TerminalStyle.stdoutSupportsBold
         let columns = headers.count
         func sanitize(_ text: String) -> String {
             text.replacingOccurrences(of: "|", with: "¦")
@@ -20,11 +25,14 @@ public enum Table {
         let widths = (0..<columns).map { column in
             ([headers[column]] + rows.map { $0[column] }).map { sanitize($0).count }.max() ?? 0
         }
-        func rowLine(_ cells: [String]) -> String {
+        func rowLine(_ cells: [String], bold: Bool = false) -> String {
             let body = (0..<columns).map { column -> String in
                 let cell = sanitize(cells[column])
                 let pad = String(repeating: " ", count: widths[column] - cell.count)
-                return " " + (leftColumns.contains(column) ? cell + pad : pad + cell) + " "
+                // Style only the label, after measuring plain text. Padding
+                // and grid walls remain unstyled; SGR 22 ends bold intensity.
+                let label = bold && !cell.isEmpty ? "\u{1B}[1m\(cell)\u{1B}[22m" : cell
+                return " " + (leftColumns.contains(column) ? label + pad : pad + label) + " "
             }
             .joined(separator: "│")
             return "│" + body + "│"
@@ -35,7 +43,7 @@ public enum Table {
             let body = widths.map { String(repeating: "─", count: $0 + 2) }.joined(separator: mid)
             return left + body + right
         }
-        var lines = [ruleLine("┌", "┬", "┐"), rowLine(headers)]
+        var lines = [ruleLine("┌", "┬", "┐"), rowLine(headers, bold: boldHeaders)]
         for row in rows {
             lines.append(ruleLine("├", "┼", "┤"))
             lines.append(rowLine(row))
@@ -45,7 +53,8 @@ public enum Table {
     }
 }
 
-/// Renders a ``PortfolioSummary`` as a plain-text report for terminals.
+/// Renders a ``PortfolioSummary`` as a stdout report: bold table
+/// headers on terminals, plain text when piped or redirected.
 ///
 /// Numbers use fixed `en_US`-style grouping (thousands separators) so
 /// output is deterministic across machines; localizing formatting is a

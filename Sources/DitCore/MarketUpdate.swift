@@ -387,10 +387,17 @@ public struct MarketUpdater: Sendable {
         // --- FX pair history ---
         // A pair is filled from the first day any money existed in the
         // portfolio (the pair only ever serves valuation) through today.
-        // Tail-filled: requests start one day past the watermark, and a
-        // series is considered current when it reaches within three
-        // days of today (weekends, and "yesterday's close is today's
-        // best known rate").
+        // Tail-filled: requests start one day past the watermark.
+        //
+        // The skip rule used to be "within three days of today counts as
+        // current", which quietly priced a Monday off the Friday close
+        // and cost real money: a 3-day-old rate was never re-fetched, so
+        // every USD figure in every report drifted against the live rate
+        // with nothing ever flagging it. FX quotes around the clock and
+        // the cost of topping up is one short request, so the tolerance
+        // is gone — a pair is current only when it actually reaches
+        // today. It still skips when the store already has today, so a
+        // second run in the same day does no network work.
         let earliestOverall = portfolio.transactions.map(\.date).min()
         for currency in plan.fxCurrencies {
             guard let pairTicker = plan.hub.quoteTicker(against: currency) else { continue }
@@ -398,7 +405,7 @@ public struct MarketUpdater: Sendable {
             guard let start = earliestOverall else { continue }
             let existing = data.series[pairKey]
             if mode == .incremental,
-               let lastDay = existing?.coveredThrough, lastDay >= todayDay.addingTimeInterval(-86_400 * 3) {
+               let lastDay = existing?.coveredThrough, lastDay >= todayDay {
                 report.seriesSkipped += 1
                 report.historyRows.append(Self.coverageRow(pairKey, existing, added: 0))
                 continue

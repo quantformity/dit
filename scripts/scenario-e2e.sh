@@ -658,17 +658,27 @@ expect_fail_match "html: empty stdin refused, not an empty page" 1 "no JSON on s
 
 echo
 echo "-- 23. dit update — the composite refresh (offline-safe checks only) --"
-# 'dit update' chains 'market latest' + 'market history'. The checks
-# here never touch the network: the two refusals happen before any
-# fetch, and the empty-store path returns before one too. (The
-# fetching path is exercised by hand, never in this script — e2e
-# stays offline.)
+# 'dit update' chains 'market latest' + a gap-filling 'market history'
+# + the coverage audit. The checks here never touch the network: the
+# refusals happen before any fetch, and the empty-store path returns
+# before one too. (The fetching path is exercised by hand, never in
+# this script — e2e stays offline.)
 upd() { env DIT_BACKEND=file DIT_STORE_URL="$WORKDIR/updstore" DIT_MARKET_URL="$WORKDIR/updmarket" "$DIT" "$@"; }
 mkdir -p "$WORKDIR/updstore"
 expect_fail_match "update: --offline refuses the composite fetch" 2 "refuses the network" upd --offline update
-expect_fail_match "update: stray options are usage errors"        2 "takes no options"  upd update --all
+expect_fail_match "update: an option it does not take is a usage error" 2 "unknown option '--all'" upd update --all
+# --quick / --rebuild are real options: the empty-store guard returns
+# before any fetch, so these prove the flags parse without going online.
+expect_ok_match   "update: --quick is accepted (tail-only history pass)" "Nothing to update" upd update --quick
+expect_ok_match   "update: --rebuild is accepted (erase + refetch pass)" "Nothing to update" upd update --rebuild
+expect_fail_match "update: a stray positional is a usage error"    2 "unexpected argument"      upd update AAPL
 expect_ok_match   "update: empty store = quiet success, no fetch" "Nothing to update"   upd update
 expect_fail_match "update: --json has no schema (usage error)"    2 "not supported"     upd --offline --json update
+
+echo
+echo "-- 24. Table headers — terminal styling, plain pipes, unchanged JSON --"
+expect_ok "tables: bold headers only on terminals, opt-outs honored" \
+  python3 "$(dirname "$0")/check-table-headers.py" "$DIT" "$CV/store" "$CV/market"
 
 echo
 echo "================================================"
