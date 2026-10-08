@@ -856,9 +856,9 @@ wrong").
 1. **The FX three-day tolerance.** `updateHistory` skipped a currency
    pair whose newest stored close was within three days of today. On a
    Monday that prices the whole book off Friday's rate — and coverage
-   still called the chain "usable", so nothing warned. A 3-day USD/CAD
-   drift is ~0.02%, which on a mostly-USD portfolio is a four-figure
-   CAD error moving the wrong way. Replaced with: a pair is current
+   still called the chain "usable", so nothing warned. Every foreign-
+   currency figure in every report drifts against the live rate with
+   nothing flagging it. Replaced with: a pair is current
    only when it reaches today. A successful-but-empty fetch still
    advances the watermark, and the skip still fires when the store
    already has today, so a same-day rerun does no network work.
@@ -876,15 +876,17 @@ wrong").
 the data also states what is still missing — the multi-step
 "audit, refresh, refill" routine is one line now.
 
-Proof, same seeded damage, same machine:
+Proof, on a copy of a real store, same seeded damage both runs (figures
+elided — they are portfolio data, not a durable fact about the code):
 
-| | VRT closes | USD/CAD closes | 3-month P&L |
-|---|---:|---:|---:|
-| old `dit update` | 12 (unchanged) | 455 (unchanged) | 78,766.37 @1.4258 |
-| new `dit update` | 112 | 457 | 78,999.52 @1.4261 |
+| | VRT closes | USD/CAD closes |
+|---|---:|---:|
+| old `dit update` | 12 (unchanged) | 455 (unchanged) |
+| new `dit update` | 112 | 457 |
 
 The old build silently fixed nothing; the new one stored 102 points and
-moved the reported P&L by ~233 CAD by making it reflect real data.
+moved the reported P&L by a visible amount, by making it reflect real
+data. Verified before commit with `market coverage --strict` at exit 0.
 Cost when the store is already current: ~0.15s, no fetches.
 
 Tests: 195 Swift-Testing + 114 XCTest green (one XCTest rewritten to
