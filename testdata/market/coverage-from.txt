@@ -1,0 +1,28 @@
+Market coverage — file at <MARKET>
+  audit date 2026-10-01 · window 2026-08-01 … 2026-10-01 · reporting into CAD
+  scope: all 1 account(s)
+
+Prices (per held symbol and its recorded currency):
+  ┌────────┬─────┬────────────┬─────────────────────────────────────────────────────────────────────────┐
+  │ Symbol │ Ccy │ Accounts   │ Coverage                                                                │
+  ├────────┼─────┼────────────┼─────────────────────────────────────────────────────────────────────────┤
+  │ FAST   │ USD │ Oracle USD │ ok — 60 closes, 2026-08-01…2026-09-29                                   │
+  ├────────┼─────┼────────────┼─────────────────────────────────────────────────────────────────────────┤
+  │ GAPPY  │ USD │ Oracle USD │ ok — 59 closes, 2026-08-02…2026-09-29                                   │
+  ├────────┼─────┼────────────┼─────────────────────────────────────────────────────────────────────────┤
+  │ NOPE   │ USD │ Oracle USD │ NO DATA — no daily series for NOPE — P&L dashes, summary values at cost │
+  └────────┴─────┴────────────┴─────────────────────────────────────────────────────────────────────────┘
+
+FX into CAD (what combining foreign totals needs):
+  ┌─────────┬───────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ Chain   │ Coverage                                                                                      │
+  ├─────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ HKD→CAD │ ok — ~derived via USD (HKD→USD→CAD), last close 2026-10-01 (0d); usable at all 1 period ends  │
+  ├─────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ JPY→CAD │ NO CHAIN — no stored path JPY→CAD; import a JPY/CAD series or both USD legs (separate totals) │
+  ├─────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ USD→CAD │ ok — USD/CAD direct, last close 2026-10-01 (0d); usable at all 1 period ends                  │
+  └─────────┴───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  * derived price proxy · ~ derived FX chain (inverted/cross) — labelled approximations, NOT missing data
+  NO DATA / WRONG CCY / NO CHAIN → 'dit market history' fetches what is missing, 'dit market import FILE' seeds measured data

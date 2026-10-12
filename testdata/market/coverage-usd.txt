@@ -1,0 +1,26 @@
+Market coverage — file at <MARKET>
+  audit date 2026-10-01 · window 2026-06-01 … 2026-10-01 · reporting into USD
+  scope: all 1 account(s)
+
+Prices (per held symbol and its recorded currency):
+  ┌────────┬─────┬────────────┬─────────────────────────────────────────────────────────────────────────┐
+  │ Symbol │ Ccy │ Accounts   │ Coverage                                                                │
+  ├────────┼─────┼────────────┼─────────────────────────────────────────────────────────────────────────┤
+  │ FAST   │ USD │ Oracle USD │ ok — 112 closes, 2026-06-10…2026-09-29                                  │
+  ├────────┼─────┼────────────┼─────────────────────────────────────────────────────────────────────────┤
+  │ GAPPY  │ USD │ Oracle USD │ GAPS — longest hole 14d (2026-07-19…2026-08-01), 98 closes in window    │
+  ├────────┼─────┼────────────┼─────────────────────────────────────────────────────────────────────────┤
+  │ NOPE   │ USD │ Oracle USD │ NO DATA — no daily series for NOPE — P&L dashes, summary values at cost │
+  └────────┴─────┴────────────┴─────────────────────────────────────────────────────────────────────────┘
+
+FX into USD (what combining foreign totals needs):
+  ┌─────────┬───────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ Chain   │ Coverage                                                                                      │
+  ├─────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ HKD→USD │ ok — HKD/USD direct, last close 2026-10-01 (0d); usable at all 5 period ends                  │
+  ├─────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ JPY→USD │ NO CHAIN — no stored path JPY→USD; import a JPY/USD series or both USD legs (separate totals) │
+  └─────────┴───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  GAPS = holes of ≥ 10 missing days; shorter runs are weekend/holiday dust (weekday-sampled data) and stay unlisted
+  NO DATA / WRONG CCY / NO CHAIN → 'dit market history' fetches what is missing, 'dit market import FILE' seeds measured data

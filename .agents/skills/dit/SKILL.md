@@ -19,7 +19,7 @@ Two stores, both local:
 ## First moves (all read-only)
 
 ```bash
-command -v dit || echo "MISSING: build with swift build -c release, or scripts/build.sh"
+command -v dit || echo "MISSING: build with go build -o .build/dit ./cmd/dit"
 dit store path          # backend, location, account/transaction/ticker counts
 dit help                # full command listing
 dit help <group>        # one group: account, tx, ticker, store, market, quote, pnl
@@ -123,10 +123,11 @@ dit tx delete  017699AF --yes
   negative position ("untracked short"), and a partial GIC redemption are all
   *recorded with a loud warning*. Report the warning; never invent a balancing
   entry to make numbers tidy.
-- Destructive paths (`tx delete`, `account delete`, `store import` replace)
-  need `--yes` on a non-interactive terminal, and `--force` when an account
-  still has a ledger. **Ask the user before running any of these, and run
-  `dit store backup` first.**
+- Destructive paths (`tx delete`, `account delete`, `store import` replace,
+  `dit import` replace) need `--yes` on a non-interactive terminal, and
+  `--force` when an account still has a ledger. **Ask the user before running
+  any of these, and run `dit store backup` first** (a replace `dit import`
+  backs both stores up on its own unless `--force`).
 - After writes, re-read (`dit tx list --account …`, `dit --offline summary`)
   and confirm what actually got booked instead of trusting the exit code.
 
@@ -157,12 +158,13 @@ and always relay that its numbers are derived.
 ## Charts (optional presentation)
 
 ```bash
-dit --json | dit-chart --ascii > snapshot.txt     # terminal bars
-dit --json | dit-chart --open                     # one self-contained HTML page, opened
+dit --json | dit-chart --ascii > snapshot.txt     # if dit-chart is installed separately
+dit --json | dit-chart --open                     # optional companion, not built by this Go project
 ```
 
-`dit-chart` refuses documents it cannot honestly chart (exit 1) and renders
-`null` as a dash, never as a zero-length bar.
+The Go project does not include the separate `dit-chart` binary. If it is
+installed independently, it refuses documents it cannot honestly chart
+(exit 1) and renders `null` as a dash, never as a zero-length bar.
 
 ## Pitfalls
 

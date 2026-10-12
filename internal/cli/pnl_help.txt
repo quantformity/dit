@@ -1,0 +1,64 @@
+USAGE: dit pnl [--horizon H | --from DATE [--to DATE]] [--account A[,A...]]
+       [--tickers T[,T...]] [--ccy C[,C...]] [--reporting-ccy CCY]
+       [--time-series [--daily]] [--json] [--offline] [--display CCY] [--store PATH]
+
+  Historical P&L between dates, built from the ledger and the
+  market store — two components, never merged:
+    Realized    what the ledger booked inside the window (sale
+                gains over cost, GIC redemption gains,
+                dividends net of fees).
+    Position Δ  mark-to-market drift across the window: value
+                at the window's closing mark minus its value
+                at the close before it opened.
+  They add to the window's economic result without double
+  counting; without a usable price pair at BOTH boundaries
+  the Position Δ and Total are dashed — never guessed.
+
+  Windows are inclusive on both ends. --horizon: Nd/Nw/Nm/Ny
+  (e.g. 5d, 2w, 3m, 2y) counted back from --to or today, and
+  'ytd'. No flags: the full ledger (exact by construction —
+  nothing was held before the first trade). --to alone: from
+  the ledger's first transaction to that date. --horizon and
+  --from/--to are mutually exclusive (exit 2).
+
+  Scope: no --account aggregates the whole portfolio into one
+  view (rows merge across accounts); --account names you asked
+  for THEM — rows stay per account. --tickers and --ccy filter
+  positions; a filter that matches nothing reports "nothing",
+  it never silently widens back to everything.
+
+  Money rules: text output speaks ONE currency — the
+  reporting currency (--reporting-ccy, default: --display,
+  CAD). Native amounts never mix in the table; when rows
+  carry a different recorded currency, a 'From' column names
+  it. Cross-currency figures convert at the FX close stored
+  ON/BEFORE the relevant date (direct pair, inverted twin,
+  or USD triangulation — composed rates are marked ~, never
+  smoothed). A stale (>1 week) or missing close means DASH:
+  today's rate is never projected backwards. --reporting-ccy
+  changes only this run's display — it never rewrites any
+  account's stored reporting currency. Exact native figures
+  (plus a converted 'reported' triple) stay in --json.
+  Prices and rates come from the market store only — this
+  command never fetches ('dit market history' fills it).
+
+  --time-series slices the window into periods (auto: monthly
+  above 8 weeks, weekly above 10 days, daily below — always
+  labelled) and prints one row per period, each computed with
+  its own baseline close and converted at ITS OWN end-date FX
+  — a June slice never wears July's rate. --daily forces
+  daily periods at any window length (alone it is a usage
+  error — it only modifies --time-series). Contiguous periods
+  telescope in native amounts: when every period is
+  measurable the printout says "Σ periods = window total
+  (exact)"; gaps stay dashed and the sum is refused, never
+  faked. Combines with filters.
+
+  EXAMPLES
+    dit pnl
+    dit pnl --horizon 1y
+    dit pnl --time-series                          # default window, sliced
+    dit pnl --time-series --daily                  # every day that speaks
+    dit pnl --time-series --from 2026-01-01 --to 2026-09-30
+    dit pnl --from 2026-01-01 --to 2026-09-30 --reporting-ccy USD
+    dit pnl --account "TFSA" --tickers RBLX.NE --ccy USD

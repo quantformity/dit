@@ -1,0 +1,7 @@
+Transaction:
+  ID:        096C1D1E-55CB-4224-A012-866628F90BAF
+  Date:      2028-01-04
+  Account:   TFSA
+  Currency:  CAD
+  Details:   dividend SHOP.TO 25.12345 CAD fee 0.05
+  Fee:       CAD 0.05

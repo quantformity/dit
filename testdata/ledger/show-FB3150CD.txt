@@ -1,0 +1,7 @@
+Transaction:
+  ID:        FB3150CD-BA75-442D-AAC7-A0227B64C64F
+  Date:      2028-01-05
+  Account:   TFSA
+  Currency:  CAD
+  Details:   withdrawal 200 CAD
+  Fee:       —

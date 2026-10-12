@@ -1,0 +1,25 @@
+Market coverage — file at <MARKET>
+  audit date 2026-10-01 · window 2026-06-01 … 2026-10-01 · reporting into CAD
+  scope: all 1 account(s)
+
+Prices (per held symbol and its recorded currency):
+  ┌────────┬─────┬────────────┬──────────────────────────────────────────────────────────────────────┐
+  │ Symbol │ Ccy │ Accounts   │ Coverage                                                             │
+  ├────────┼─────┼────────────┼──────────────────────────────────────────────────────────────────────┤
+  │ GAPPY  │ USD │ Oracle USD │ GAPS — longest hole 14d (2026-07-19…2026-08-01), 98 closes in window │
+  └────────┴─────┴────────────┴──────────────────────────────────────────────────────────────────────┘
+
+FX into CAD (what combining foreign totals needs):
+  ┌─────────┬───────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ Chain   │ Coverage                                                                                      │
+  ├─────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ HKD→CAD │ ok — ~derived via USD (HKD→USD→CAD), last close 2026-10-01 (0d); usable at all 5 period ends  │
+  ├─────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ JPY→CAD │ NO CHAIN — no stored path JPY→CAD; import a JPY/CAD series or both USD legs (separate totals) │
+  ├─────────┼───────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ USD→CAD │ ok — USD/CAD direct, last close 2026-10-01 (0d); usable at all 5 period ends                  │
+  └─────────┴───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  * derived price proxy · ~ derived FX chain (inverted/cross) — labelled approximations, NOT missing data
+  GAPS = holes of ≥ 10 missing days; shorter runs are weekend/holiday dust (weekday-sampled data) and stay unlisted
+  NO DATA / WRONG CCY / NO CHAIN → 'dit market history' fetches what is missing, 'dit market import FILE' seeds measured data

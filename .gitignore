@@ -1,5 +1,5 @@
 .build/
-.swiftpm/
-xcuserdata/
-DerivedData/
+*.test
 .DS_Store
+.pi/
+.temp/

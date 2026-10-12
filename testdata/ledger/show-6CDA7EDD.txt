@@ -1,0 +1,7 @@
+Transaction:
+  ID:        6CDA7EDD-F142-43E3-8DB7-72C5AAD3CBE7
+  Date:      2026-01-02
+  Account:   TFSA
+  Currency:  USD
+  Details:   fx 2000 CAD → 1400 USD fee 0.33
+  Fee:       USD 0.33

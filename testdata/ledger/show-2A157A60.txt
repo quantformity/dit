@@ -1,0 +1,7 @@
+Transaction:
+  ID:        2A157A60-FC92-4C7F-94A3-6A962EB8E1F5
+  Date:      2028-01-03
+  Account:   TFSA
+  Currency:  CAD
+  Details:   GIC redemption 16300 CAD (purchase CE7A72F2)
+  Fee:       —

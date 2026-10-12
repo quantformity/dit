@@ -1,0 +1,8 @@
+Transaction:
+  ID:        CE7A72F2-47FE-440F-8C6E-175FC632C5C4
+  Date:      2026-01-03
+  Account:   TFSA
+  Currency:  CAD
+  Details:   GIC '2-Year | GIC' 15000 CAD @ 4.4% until 2028-01-03
+  Terms:     compounds monthly, early redemption allowed
+  Fee:       —

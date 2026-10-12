@@ -35,7 +35,7 @@ while [ $# -gt 0 ]; do
 done
 
 command -v dit >/dev/null 2>&1 || {
-  echo "x 'dit' is not on PATH — build it (swift build -c release, then scripts/build.sh) or point --store at the data and run from the repo." >&2
+  echo "x 'dit' is not on PATH — build it with 'go build -o .build/dit ./cmd/dit' from the Go project, or point --store at the data." >&2
   exit 2
 }
 

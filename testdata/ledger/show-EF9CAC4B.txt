@@ -1,0 +1,7 @@
+Transaction:
+  ID:        EF9CAC4B-895A-4E71-8F6A-488DAEFA742C
+  Date:      2028-01-04
+  Account:   TFSA
+  Currency:  CAD
+  Details:   sell 1 SHOP.TO @ 100 fee 0.01
+  Fee:       CAD 0.01

@@ -10,7 +10,7 @@ read-only.
 |---|---|
 | `--display CCY` | Display currency for money shown (default `CAD`). CAD, USD, GBP, CHF, EUR, JPY, AUD, NZD, CNY, HKD; anything else is a usage error. |
 | `--offline` | Never touch the network. Commands that *require* a fresh quote refuse it. |
-| `--backend file\|sqlite` | Portable JSON directory, or libsqlite3 database. |
+| `--backend file\|sqlite` | Portable JSON directory, or SQLite database (Go `modernc.org/sqlite`; no cgo requirement). |
 | `--store PATH` | Portfolio store: directory (file) or db file (sqlite). |
 | `--market-store PATH` | Price-history store. Defaults beside the portfolio store (`market` / `market.sqlite`). |
 | `--json` | One JSON document on stdout for the supported read commands (see `json.md`). |
@@ -122,6 +122,27 @@ unknown, ticker symbols upserted without overwriting existing entries. Other
 accounts are untouched. Malformed or multi-account files are refused before
 anything is written.
 
+## Full-portfolio transfer (`bundle/1`)
+
+```
+dit export [--to FILE] [--portfolio-only|--market-only]   # ONE file: ledger + prices
+dit import FILE [--merge] [--force] [--yes]
+```
+
+A DIFFERENT format from `store export`/`store import` (those move one
+account's ledger): this pair moves both stores in one file, and each pair
+refuses the other's file. Use it when the answer needs prices, not just cash
+— a ledger restored without its closes P&Ls as `—` everywhere.
+
+Default import = **replace** both stores: confirms first (a non-interactive
+run needs `--yes`) and copies both stores to `*.bak-<stamp>` unless
+`--force`. `--merge` adds only — transactions by ID, closes day by day (a
+stored real close stays; an imported real close retires a *derived* one), the
+newer snapshot per symbol — so it neither confirms nor backs up. Damaged
+input is refused, never half-read: an import that quietly stored fewer prices
+than the file had would look like it worked. Merged prices arrive WITHOUT the
+file's coverage watermark, so `dit update` still re-verifies the range.
+
 ## Quotes
 
 ```
@@ -200,9 +221,9 @@ dit market coverage [--from D --to D] [--account A] [--tickers T] [--reporting-c
   were really quoted. Fills are tagged `derived via …`, never overwrite real
   observations, and never touch the ledger.
 
-## Charts — `dit-chart`
+## Charts — optional `dit-chart` companion
 
-Separate binary in the same package; reads one JSON document on stdin.
+`dit-chart` is a separate binary and is not included or built by this Go project. If installed independently, it reads one JSON document on stdin.
 
 ```
 dit --json | dit-chart                     # terminal bars (summary/1 only)

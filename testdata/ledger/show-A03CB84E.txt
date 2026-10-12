@@ -1,0 +1,7 @@
+Transaction:
+  ID:        A03CB84E-C45F-4C71-8328-09A34CAF93F1
+  Date:      2026-01-01
+  Account:   TFSA
+  Currency:  CAD
+  Details:   buy 3.14159265 SHOP.TO @ 80.12345678 fee 0.125
+  Fee:       CAD 0.12

@@ -1,0 +1,7 @@
+Transaction:
+  ID:        139D6985-1723-4749-9E9B-9E09011C253D
+  Date:      2026-01-01
+  Account:   TFSA
+  Currency:  CAD
+  Details:   deposit 20000 CAD
+  Fee:       —

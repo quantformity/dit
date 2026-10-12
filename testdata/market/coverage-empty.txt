@@ -1,0 +1,5 @@
+Market coverage — file at <MARKET>
+  audit date 2026-03-01 · window 2026-03-01 … 2026-03-01 · reporting into CAD
+  scope: all 1 account(s)
+
+  Nothing held at the audit date (no open positions, no foreign cash) — nothing to cover.

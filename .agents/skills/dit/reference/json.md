@@ -237,7 +237,8 @@ out=$(dit --json summary); rc=$?
 if [ $rc -ne 0 ]; then echo "dit failed (rc=$rc): $(echo "$out" | jq -r '.error // "no envelope"')"; fi
 echo "$out" | jq -r 'select(.ok) | .data.holdings[] | [.symbol,.ccy,.pnl,.pnlPct] | @tsv'
 
-# chart or report honestly (refusal is exit 1, not a silent empty file)
+# optional: requires the separate dit-chart companion to be installed
+# refusal is exit 1, not a silent empty file
 dit --json | dit-chart --ascii > snapshot.txt
 ```
 
