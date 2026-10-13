@@ -613,16 +613,46 @@ func accountShow(c Context, args []string) error {
 	if c.JSON {
 		return managementAccountJSON(c, a, b, txs, o.Has("history"))
 	}
+	now := time.Now()
+	scoped := &model.Portfolio{Accounts: []model.Account{a}, Transactions: txs, Tickers: p.Tickers}
+	day := model.Day(model.DayStartUTC(now.Unix()))
+	display := a.ReportingCurrency
+	notes := []string{}
+	var summary valuation.Summary
+	stalePriced := false
+	if c.Offline {
+		summary = valuation.CostSummary(scoped, display, day)
+		notes = append(notes, "offline mode: positions at cost basis, no FX conversion")
+	} else {
+		_, market, err := summaryLoad(c)
+		if err != nil {
+			return err
+		}
+		summary, _, stalePriced = runLive(scoped, market, display, now, &notes)
+	}
+	for _, short := range summary.Shorts {
+		notes = append(notes, fmt.Sprintf("untracked short: %s sold %s %s (%s) beyond its holding — cash shows the proceeds, the short itself is not tracked, so totals here are incomplete", short.AccountName, summaryQuantity(short.Shares), short.Symbol, short.Currency))
+	}
+	if stalePriced {
+		c.printf("No live quote could be fetched. Positions below are priced from stored closes, " +
+			"which are NOT today's prices — see Notes.\n\n")
+	}
+	report := RenderSummary(summary, now, notes, boldHeaders(c))
+	report = strings.Replace(report, "Portfolio summary —", "Account summary — "+displayAccount(a)+" —", 1)
+	c.printf("%s\n", report)
+
+	c.printf("\nAccount details:\n  ID:        %s\n", strings.ToUpper(a.ID))
+	if a.Institution != nil {
+		c.printf("  Institution: %s\n", *a.Institution)
+	}
+	if a.AccountNumber != nil {
+		c.printf("  Number:    %s\n", *a.AccountNumber)
+	}
 	tax := "no"
 	if a.Taxable {
 		tax = "yes"
 	}
-	c.printf("Account:\n")
-	managementTable(c, []string{"Name", "Institution", "Ccy", "Taxable"}, [][]string{{displayAccount(a), OrEmpty(a.Institution), string(a.ReportingCurrency), tax}}, "  ", nil)
-	c.printf("  ID:        %s\n", strings.ToUpper(a.ID))
-	if a.AccountNumber != nil {
-		c.printf("  Number:    %s\n", *a.AccountNumber)
-	}
+	c.printf("  Taxable:   %s\n", tax)
 	opened, closed := "—", "—"
 	if a.OpenedDate != nil {
 		opened = a.OpenedDate.String()
@@ -634,29 +664,13 @@ func accountShow(c Context, args []string) error {
 	if a.Notes != nil {
 		c.printf("  Notes:     %s\n", *a.Notes)
 	}
-	c.printf("\nBalances (offline derivation: positions at cost basis, no FX applied):\n")
-	realized := decimal.Zero
-	if b.Realized != nil {
-		realized = *b.Realized
-	}
-	rows := [][]string{{"Cash", managementAmounts(b.CashByCurrency)}, {"GICs (at par)", managementAmounts(b.GICByCurrency)}, {"Dividends", managementAmounts(b.DividendsByCurrency)}, {"Realized P&L", string(a.ReportingCurrency) + " " + text.Money(realized)}}
-	managementTable(c, []string{"Balance", "Amount"}, rows, "  ", map[int]bool{0: true})
-	if len(b.Positions) == 0 {
-		c.printf("\n  Positions: — (no holdings booked to this account)\n")
-	} else {
-		c.printf("\n  Positions (cost basis — no market value applied):\n")
-		rows = [][]string{}
-		for _, pos := range b.Positions {
-			rows = append(rows, []string{pos.Symbol, text.Quantity(pos.Shares), text.Quantity(pos.AverageCost), string(pos.Currency) + " " + text.Money(pos.Cost)})
-		}
-		managementTable(c, []string{"Symbol", "Shares", "Cost/Share", "Cost Basis"}, rows, "    ", map[int]bool{0: true})
-	}
+	c.printf("\nStore: %s\n", c.PortfolioLocation())
 	if o.Has("history") {
 		c.printf("\nHistory (%d transaction(s), oldest first):\n", len(txs))
 		if len(txs) == 0 {
 			c.printf("  — no activity recorded —\n")
 		} else {
-			rows = [][]string{}
+			rows := [][]string{}
 			for _, tx := range txs {
 				rows = append(rows, []string{ledger.ShortID(tx.ID), tx.Date.String(), string(tx.Kind.Type), ledger.SummaryLine(tx)})
 			}

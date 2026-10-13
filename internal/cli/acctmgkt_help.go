@@ -3,9 +3,11 @@ package cli
 var acctmgktHelp = map[string]string{
 	"account show": `USAGE: dit account show <account> [--history]
 
-  Account details plus balances derived from its transactions,
-  computed offline: positions show at cost basis and foreign
-  amounts stay unconverted (no FX is applied).
+  Account details plus a summary-style view scoped to this account.
+  Text values use the account's reporting currency, with live quotes
+  and FX like dit summary; --offline disables network and FX, showing
+  positions at cost basis with foreign amounts unconverted. --json keeps
+  the raw per-currency account/1 ledger view.
 
   --history appends the account's full chronological ledger
   (deposits, trades, dividends, GICs, FX — oldest first, with

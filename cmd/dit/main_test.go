@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -149,6 +150,13 @@ func TestCoverageWithoutDisplayMatchesOracle(t *testing.T) {
 				t.Fatalf("stderr = %q, want %q", got.stderr, tc.wantStderr)
 			}
 		})
+	}
+}
+
+func TestVersionTextIncludesVersionAndBuildTimestamp(t *testing.T) {
+	got := versionText()
+	if !regexp.MustCompile(`^dit 0\.0\.1 \([0-9]{8}\.[0-9]{6}\)$`).MatchString(got) {
+		t.Fatalf("versionText() = %q, want dit 0.0.1 (YYYYMMDD.HHMMSS)", got)
 	}
 }
 

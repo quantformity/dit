@@ -430,7 +430,18 @@ func RenderSummary(s valuation.Summary, now time.Time, notes []string, bold bool
 	}
 	allNotes := append([]string(nil), notes...)
 	if showConverted {
-		allNotes = append(allNotes, "Value ("+display+"), Day ("+display+") and P&L ("+display+") are converted at the current FX rate; Day% and P&L% stay native-currency ratios so FX movement cannot masquerade as trading gain")
+		offline := false
+		for _, note := range notes {
+			if strings.HasPrefix(note, "offline mode:") {
+				offline = true
+				break
+			}
+		}
+		if offline {
+			allNotes = append(allNotes, "Value ("+display+"), Day ("+display+") and P&L ("+display+") require FX conversion; offline mode does not convert currencies, so foreign-currency values are unavailable; Day% and P&L% stay native-currency ratios")
+		} else {
+			allNotes = append(allNotes, "Value ("+display+"), Day ("+display+") and P&L ("+display+") are converted at the current FX rate; Day% and P&L% stay native-currency ratios so FX movement cannot masquerade as trading gain")
+		}
 	}
 	if showDay {
 		allNotes = append(allNotes, "day change = latest quote vs the previous stored close of the same ticker (a model comparison where history is derived)")

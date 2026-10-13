@@ -113,6 +113,52 @@ func TestManagementTickerDeleteLeavesLedgerReferences(t *testing.T) {
 		t.Fatal("registry deletion changed transaction")
 	}
 }
+func TestAccountShowUsesScopedSummaryLayout(t *testing.T) {
+	c, _ := managementFixture(t)
+	t.Setenv("DIT_PROVIDER_STUB", writePin(t, `{"quotes":[],"rates":[{"base":"USD","quote":"CAD","rate":"1.5"}]}`))
+	p, err := transferLedger(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Transactions = append(p.Transactions, model.Transaction{
+		ID:        "44444444-4444-4444-8444-444444444444",
+		AccountID: p.Accounts[0].ID,
+		Date:      p.Transactions[0].Date,
+		Currency:  model.USD,
+		Kind:      model.Kind{Type: model.KindStockPurchase, Stock: &model.StockDetails{Ticker: "XYZ", Shares: decimal.FromInt(1), Price: decimal.FromInt(10)}},
+	})
+	if err := transferSave(c, p, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := managementRun(c, "account show", []string{"Main"}); got != 0 {
+		t.Fatalf("exit %d: %s", got, c.Err)
+	}
+	out := c.Out.(*bytes.Buffer).String()
+	for _, want := range []string{"Account summary — Main —", "Total value      0.00 CAD", "Cash             -3,015.00 CAD", "Positions        3,015.00 CAD", "GICs (at par)    0.00 CAD", "By currency:", "Accounts:", "Holdings:", "ABC", "Account details:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("account summary missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Other") {
+		t.Fatalf("account summary included another account:\n%s", out)
+	}
+	var accountRow string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "Main") && strings.Contains(line, "-3,015.00") {
+			accountRow = line
+			break
+		}
+	}
+	for _, want := range []string{"3,015.00", "0.00"} {
+		if !strings.Contains(accountRow, want) {
+			t.Fatalf("account table missing converted account-currency amount %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(accountRow, "USD") {
+		t.Fatalf("account table should be one row in reporting currency:\n%s", accountRow)
+	}
+}
+
 func TestManagementAccountJSONQuantityIsUngrouped(t *testing.T) {
 	c, _ := managementFixture(t)
 	c.JSON = true

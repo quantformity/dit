@@ -10,14 +10,15 @@ import (
 
 	"dit/internal/config"
 	"dit/internal/model"
+	"dit/internal/valuation"
 )
 
 var fixtureNow = time.Date(2026, 10, 9, 20, 0, 0, 0, time.UTC)
 
 type summaryDoc struct {
-	OK      bool `json:"ok"`
-	Schema  string
-	Data    map[string]any `json:"data"`
+	OK     bool `json:"ok"`
+	Schema string
+	Data   map[string]any `json:"data"`
 }
 
 func (d summaryDoc) data() map[string]any {
@@ -224,6 +225,20 @@ func TestSummaryOfflineIsCostWithNoObservations(t *testing.T) {
 	}
 	if got := doc.data()["offline"]; got != true {
 		t.Fatalf("offline flag = %v", got)
+	}
+}
+
+func TestOfflineSummaryTextDoesNotClaimFXConversion(t *testing.T) {
+	summary := valuation.Summary{
+		DisplayCurrency: model.CAD,
+		Holdings:        []valuation.Position{{Symbol: "NVDA", Currency: model.USD}},
+	}
+	out := RenderSummary(summary, fixtureNow, []string{"offline mode: positions at cost basis, no FX conversion"}, false)
+	if strings.Contains(out, "converted at the current FX rate") {
+		t.Fatalf("offline output falsely claims FX conversion:\n%s", out)
+	}
+	if !strings.Contains(out, "offline mode does not convert currencies") {
+		t.Fatalf("missing offline FX explanation:\n%s", out)
 	}
 }
 

@@ -1,20 +1,20 @@
 # Porting `dit` from Swift to Go
 
-Status: **complete.** The Go CLI is verified against the Swift reference with
-all deterministic probes byte-identical. Remaining twin-run differences occur
-only in live market data fetched seconds apart.
+Status: **complete.** The Go CLI was verified against the Swift reference;
+all deterministic probes matched. Remaining differences in the final comparison
+runs were caused by live market data changing between sequential requests. The
+comparison scripts have since been removed from this project.
+
+Verification commands that remain available:
 
 ```
 $ go test ./...          # all packages green; provider tests use DIT_PROVIDER_STUB, never the network
-$ go build -o .build/ditgo ./cmd/dit
-$ scripts/twin-run.sh    # 207–208 identical; at most 1 live-summary drift
-$ MARKETWRITE=1 scripts/twin-run.sh   # 226–227 identical; live quote/summary data can drift
-$ PTY=1 scripts/twin-run.sh           # 207–208 identical; any difference is live market data
+$ scripts/build.sh
 ```
 
-The parity reference is the installed Swift binary at `/opt/homebrew/bin/dit`.
-Its original source checkout is not part of this Go project; the measured
-parity results below are captured by the harness and lane reports.
+The parity reference was the installed Swift binary at `/opt/homebrew/bin/dit`.
+Its original source checkout is not part of this Go project; the results below
+are retained as historical verification records.
 
 ## What "identical" means here
 
@@ -138,8 +138,8 @@ Not a top-down rewrite, and not a line-by-line translation. The foundation
 (decimal money, date model, store interop, text tables, JSON contract,
 dispatch skeleton, harness) was built first and locked with tests. Then each
 command was implemented in an isolated git worktree by a background agent
-against the same gate — `go test`, `go build`, `scripts/twin-run.sh`, and the
-scenario e2e — with the reference binary as the oracle. Each lane reported its
+against the same verification gate — `go test`, `go build`, the parity
+comparison, and the scenario e2e — with the reference binary as the oracle. Each lane reported its
 measured before/after and handed back only the shared seams it touched; the
 parent merged and re-ran the full gate to prove no regression. Commands were
 delivered as plain functions registered in a `Registry`, not as a class

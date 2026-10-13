@@ -1,7 +1,7 @@
 """Compare two runs by outcome, not just by printed text.
 
-twin-run uses this after probes that write. It answers three questions that a
-stdout diff cannot:
+The historical twin-run harness used this after probes that write. It answers
+three questions that a stdout diff cannot:
 
   - did both sides end up holding the same ledger and the same price history?
   - did the file each side wrote actually contain the same data?

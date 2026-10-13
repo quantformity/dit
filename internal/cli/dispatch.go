@@ -169,7 +169,7 @@ func knownSubcommand(registry Registry, group, sub string) bool {
 
 func isCommandGroup(group string) bool {
 	switch group {
-	case "account", "transaction", "tx", "ticker", "store", "market":
+	case "account", "transaction", "tx", "ticker", "store", "market", "config":
 		return true
 	}
 	return false
@@ -188,6 +188,8 @@ func unknownSubcommand(group, sub string) (string, string) {
 		return fmt.Sprintf("unknown ticker subcommand '%s' — use list, show, add, edit, or delete", sub), help
 	case "market":
 		return fmt.Sprintf("unknown market subcommand '%s' — use latest, history, backfill, import, coverage, or show (see 'dit help market')", sub), help
+	case "config":
+		return fmt.Sprintf("unknown config subcommand '%s' — use set (see 'dit help config')", sub), help
 	}
 	return fmt.Sprintf("unknown command '%s %s' — run 'dit help' for usage", group, sub), help
 }

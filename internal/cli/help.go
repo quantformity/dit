@@ -16,8 +16,16 @@ func wantsHelp(words []string) bool {
 
 func hasFlag(word string) bool { return strings.HasPrefix(word, "-") }
 
+const configCommandHelpLine = "  dit config <sub> [args]    read and update user config (see: dit config --help)"
+const backupCommandHelpLines = "  dit backup                 timestamped backup of portfolio + market data\n  dit rollback <stamp>|--list restore or list timestamped backups"
+
+func withConfigCommand(body string) string {
+	anchor := "  dit store <sub> [args]     path / export / backup / import (see: dit store --help)"
+	return strings.Replace(body, anchor, anchor+"\n"+configCommandHelpLine+"\n"+backupCommandHelpLines, 1)
+}
+
 // MainUsageText is the short top-level usage footer used for parse errors.
-func MainUsageText() string { return helpBody16 }
+func MainUsageText() string { return withConfigCommand(helpBody16) }
 
 // GlobalParseUsageText is the usage screen Swift emits when its global
 // argument scanner rejects a value before dispatch.
@@ -48,7 +56,7 @@ func resolveHelp(context Context, arguments []string) bool {
 		group, sub = "help", "" // Swift: no ("help", …) case → short help command screen
 	}
 	if group == "" {
-		context.printf("%s\n", helpBody1)
+		context.printf("%s\n", withConfigCommand(helpBody1))
 	} else {
 		context.printf("%s\n", helpTextFor(strings.ToLower(group), strings.ToLower(sub)))
 	}

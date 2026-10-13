@@ -1,9 +1,7 @@
 // Command dit is the Go port of the Swift `dit` CLI.
 //
-// It reads the same store files the Swift binary writes, and answers the same
-// questions the same way: the acceptance test is scripts/parity.sh, which runs
-// a command through both binaries against one store and fails on any
-// difference.
+// It reads the same store files the Swift binary writes. The CLI is exercised
+// by the Go test suite and was previously compared with the Swift reference.
 //
 // Exit codes are unchanged: 0 success, 1 runtime error, 2 usage error.
 package main
@@ -27,10 +25,20 @@ var globalValueFlags = map[string]bool{
 
 var globalBoolFlags = map[string]bool{"--offline": true, "--json": true}
 
+// These may be overridden at build time with -ldflags.
+var version = "0.0.1"
+var buildDate string
+
 func main() {
 	// Line-buffered output, so a message written to stderr cannot land in the
 	// middle of a table row when the two streams are merged.
 	arguments := os.Args[1:]
+	for _, argument := range arguments {
+		if argument == "--version" {
+			fmt.Println(versionText())
+			return
+		}
+	}
 	global, rest, err := parseGlobals(arguments)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -49,6 +57,21 @@ func main() {
 	}
 	context := newContext(global, layout, os.Stdout, os.Stderr)
 	os.Exit(cli.Dispatch(context, rest))
+}
+
+func versionText() string {
+	stamp := buildDate
+	if stamp == "" {
+		if executable, err := os.Executable(); err == nil {
+			if info, err := os.Stat(executable); err == nil {
+				stamp = info.ModTime().Format("20060102.150405")
+			}
+		}
+	}
+	if stamp == "" {
+		stamp = "unknown"
+	}
+	return fmt.Sprintf("dit %s (%s)", version, stamp)
 }
 
 // defaultDisplay is the currency combined totals speak when nobody says
@@ -70,6 +93,7 @@ const defaultDisplay = "CAD"
 func newContext(global globals, layout config.Layout, stdout io.Writer, stderr io.Writer) cli.Context {
 	return cli.Context{
 		Layout:  layout,
+		Version: version,
 		JSON:    global.json,
 		Offline: global.offline,
 		Display: cli.DisplayCurrency(global.display),

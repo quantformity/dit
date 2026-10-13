@@ -30,7 +30,8 @@ const helpBody1 = `USAGE: dit [command] [options]
   dit help [command]         help
 
   Global options: --display CCY, --offline, --json, --backend
-  file|sqlite, --store PATH, --market-store PATH, -h/--help.
+  file|sqlite, --store PATH, --market-store PATH, -h/--help,
+  --version.
   Flags override environment variables. Exit codes: 0 success,
   1 runtime error, 2 usage error.
 
@@ -476,7 +477,7 @@ const helpBody16 = `USAGE: dit [command] [options]
   dit help [command]         help
 
   Global options: --display CCY, --offline, --backend file|sqlite,
-  --store PATH, --market-store PATH, -h/--help. Flags override
+  --store PATH, --market-store PATH, -h/--help, --version. Flags override
   environment variables. Exit codes: 0 success, 1 runtime
   error, 2 usage error.`
 
@@ -484,23 +485,68 @@ const helpBody16 = `USAGE: dit [command] [options]
 // switch: same keys, same order, and anything unknown falls through to
 // the Swift default body (helpBody16), never to an error.
 func helpTextFor(group, sub string) string {
-	if group == "summary" && sub == "" { return helpBody2 }
-	if group == "accounts" && sub == "" { return helpBody3 }
-	if group == "account" && sub == "" { return helpBody3 }
-	if group == "account" && sub == "list" { return helpBody3 }
-	if group == "account" && sub == "show" { return helpBody4 }
-	if group == "account" && sub == "add" { return helpBody5 }
-	if group == "account" && sub == "edit" { return helpBody6 }
-	if group == "account" && sub == "close" { return helpBody7 }
-	if group == "account" && sub == "delete" { return helpBody8 }
-	if group == "tx" { return helpBody9 }
-	if group == "transaction" { return helpBody9 }
-	if group == "ticker" { return helpBody10 }
-	if group == "store" { return helpBody11 }
-	if group == "export" { return helpBody12 }
-	if group == "import" { return helpBody12 }
-	if group == "market" { return helpBody13 }
-	if group == "quote" { return helpBody14 }
-	if group == "pnl" { return helpBody15 }
-	return helpBody16
+	if group == "summary" && sub == "" {
+		return helpBody2
+	}
+	if group == "accounts" && sub == "" {
+		return helpBody3
+	}
+	if group == "account" && sub == "" {
+		return helpBody3
+	}
+	if group == "account" && sub == "list" {
+		return helpBody3
+	}
+	if group == "account" && sub == "show" {
+		return helpBody4
+	}
+	if group == "account" && sub == "add" {
+		return helpBody5
+	}
+	if group == "account" && sub == "edit" {
+		return helpBody6
+	}
+	if group == "account" && sub == "close" {
+		return helpBody7
+	}
+	if group == "account" && sub == "delete" {
+		return helpBody8
+	}
+	if group == "tx" {
+		return helpBody9
+	}
+	if group == "transaction" {
+		return helpBody9
+	}
+	if group == "ticker" {
+		return helpBody10
+	}
+	if group == "store" {
+		return helpBody11
+	}
+	if group == "export" {
+		return helpBody12
+	}
+	if group == "import" {
+		return helpBody12
+	}
+	if group == "market" {
+		return helpBody13
+	}
+	if group == "quote" {
+		return helpBody14
+	}
+	if group == "pnl" {
+		return helpBody15
+	}
+	if group == "config" {
+		return configSetHelp
+	}
+	if group == "backup" {
+		return backupHelp
+	}
+	if group == "rollback" {
+		return rollbackHelp
+	}
+	return withConfigCommand(helpBody16)
 }

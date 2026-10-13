@@ -61,6 +61,9 @@ def main() -> int:
         blocks.append(body)
 
     assert len(blocks) == 16, f"expected 16 help blocks in {SRC}, saw {len(blocks)} — HelpText.swift changed"
+    # Go adds --version, which has no Swift help-text source.
+    blocks[0] = blocks[0].replace("-h/--help.\n  Flags override", "-h/--help, --version.\n  Flags override")
+    blocks[15] = blocks[15].replace("-h/--help. Flags override", "-h/--help, --version. Flags override")
     assert not any("`" in b for b in blocks), "a backtick entered a help body; switch to interpreted Go strings"
 
     names = [f"helpBody{i}" for i in range(1, len(blocks) + 1)]

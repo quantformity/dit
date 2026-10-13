@@ -11,14 +11,18 @@ read-only.
 | `--display CCY` | Display currency for money shown (default `CAD`). CAD, USD, GBP, CHF, EUR, JPY, AUD, NZD, CNY, HKD; anything else is a usage error. |
 | `--offline` | Never touch the network. Commands that *require* a fresh quote refuse it. |
 | `--backend file\|sqlite` | Portable JSON directory, or SQLite database (Go `modernc.org/sqlite`; no cgo requirement). |
-| `--store PATH` | Portfolio store: directory (file) or db file (sqlite). |
-| `--market-store PATH` | Price-history store. Defaults beside the portfolio store (`market` / `market.sqlite`). |
+| `--store PATH` | Portfolio store: directory or `portfolio.dat` file path (file), or database path (sqlite). |
+| `--market-store PATH` | Price-history store. Defaults beside a `portfolio.dat`, otherwise under the portfolio directory. |
 | `--json` | One JSON document on stdout for the supported read commands (see `json.md`). |
 | `-h`, `--help` | Help. `dit help <group>` prints one group. Never mutates. |
+| `--version` | Prints `dit [major].[minor].[revision] (YYYYMMDD.HHMMSS)`, then exits. |
 
 Precedence: flags > environment (`DIT_BACKEND`, `DIT_STORE_URL`,
-`DIT_MARKET_URL`) > default store at `~/Library/Application Support/dit`
-(legacy `…/DirectInvestTracker` honoured when only that exists).
+`DIT_MARKET_URL`) > `~/.dit/config.json` > defaults. On first run, config
+sets `DIT_STORE_URL` to `~/.dit/portfolio.dat` and `DIT_MARKET_URL` to
+`~/.dit/market.dat`; edit either value to relocate its document. Existing
+Application Support store files are copied
+there on first initialization and left intact.
 
 Exit codes: **0** success · **1** runtime error (state conflict, lookup
 failure, store I/O, no data at all for the request) · **2** usage error.
@@ -42,7 +46,12 @@ the quote's day; no pair → dashed, never `0.00`.
 
 ```
 dit accounts
-dit account show <account> [--history]
+dit account show <account> [--history]       # live valuation in account currency; --offline = cost basis/no FX
+dit config set store PATH                   # change DIT_STORE_URL in ~/.dit/config.json
+dit config set market PATH                  # change DIT_MARKET_URL in ~/.dit/config.json
+dit backup                                  # timestamped portfolio+market backup + metadata
+dit rollback --list                         # list available backup timestamps
+dit rollback YYYYMMDD.HHMMSS [--yes]        # restore that snapshot
 dit account add    --currency CCY [--name --institution --number --taxable --non-taxable --opened D --closed D --notes T]
 dit account edit   <account> [same options]
 dit account close  <account> [--date D]

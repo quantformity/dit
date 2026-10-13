@@ -1,29 +1,27 @@
 # Measured status
 
-The Go `dit` CLI is implemented and tested against the Swift reference. Current
-verification (2026-10-12):
+The Go `dit` CLI passed its unit tests and was compared against the Swift
+reference before the comparison scripts were removed.
+
+Current checks:
 
 ```sh
 go test ./...
-go build -o .build/ditgo ./cmd/dit
-scripts/twin-run.sh
-MARKETWRITE=1 scripts/twin-run.sh
-PTY=1 scripts/twin-run.sh
+scripts/build.sh
 ```
 
-Results from recent runs:
+Recorded results from the final comparison period (2026-10-12):
 
-| Instrument | Result |
+| Check | Result |
 |---|---|
 | `go test ./...` | All packages pass |
-| Deterministic twin probes | 208/208 identical; a live summary can vary when the provider updates between runs |
-| Market-write twin probes | 226–227/228 identical; remaining differences are live-market drift |
-| PTY twin probes | 207–208/208 identical; any difference is live-market drift |
-| Scenario e2e against the Go binary | 407/407 pass |
+| Baseline command probes | 207–208/208 identical; occasional live-summary drift |
+| Market-write probes | 226–227/228 identical; remaining differences were live-market drift |
+| PTY probes | 207–208/208 identical; any difference was live-market drift |
+| Scenario suite against Go | 407/407 pass |
 
-The live probes call a changing market-data source sequentially, so their
-prices and timestamps are not expected to be byte-identical. The offline
-scenario suite is deterministic.
+The comparison scripts have been removed; these figures are historical. Live
+prices and timestamps varied between sequential requests, while the offline
+scenario suite was deterministic.
 
-See [PORT.md](PORT.md) for the port map, parity notes, and known intentional
-behavioral difference concerning stale stored closes after a failed quote.
+See [PORT.md](PORT.md) for port notes and remaining behavioral distinctions.

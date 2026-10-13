@@ -21,6 +21,8 @@ import (
 )
 
 var transferSpecs = Registry{
+	"backup":       {Run: portfolioBackup, SkipParse: true, HelpText: backupHelp},
+	"rollback":     {Run: portfolioRollback, SkipParse: true, HelpText: rollbackHelp},
 	"store export": {Run: storeExport, ValueOptions: setOf("to", "account")},
 	"store backup": {Run: storeBackup, ValueOptions: setOf("to")},
 	"store import": {Run: storeImport, FlagOptions: setOf("merge", "force", "yes")},

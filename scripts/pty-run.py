@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Run one command under a pty and stream the raw transcript to stdout.
 
-The twin harness normally pipes output, which is exactly the case where the
-reference binary refuses to bold table headers. To prove the port matches the
-terminal behaviour too, both binaries are run through this wrapper: stdout
+The former comparison harness piped output, where the reference binary
+refused to bold table headers. For a terminal-behavior comparison, both
+binaries were run through this wrapper: stdout
 and stderr become a pty slave (isatty(1) is true, so the bold policy fires),
 while stdin stays /dev/null so interactive confirmation paths take the same
 non-interactive branch they take when piped. Output keeps the pty's

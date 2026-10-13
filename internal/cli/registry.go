@@ -75,7 +75,7 @@ func (spec *Spec) ParseFor(arguments []string) (Options, error) {
 	return ParseOptions(arguments, valueOptions, flagOptions)
 }
 
-// Names lists every command name, for help and for the parity harness.
+// Names lists every registered command name for inspection and tests.
 func (registry Registry) Names() []string {
 	names := make([]string, 0, len(registry))
 	for name := range registry {
@@ -94,7 +94,7 @@ func SplitCommandWords(arguments []string) (group, sub string, rest []string) {
 		return "", "", nil
 	}
 	groups := map[string]bool{"account": true, "transaction": true, "tx": true,
-		"ticker": true, "store": true, "market": true, "quote": true, "help": true}
+		"ticker": true, "store": true, "market": true, "quote": true, "config": true, "help": true}
 	// Leading opaque options belong to the command's leftover arguments, not
 	// to command resolution. Swift accepts forms such as `-x accounts` and
 	// lets accounts decide whether to ignore them.

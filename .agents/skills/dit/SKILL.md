@@ -19,15 +19,19 @@ Two stores, both local:
 ## First moves (all read-only)
 
 ```bash
-command -v dit || echo "MISSING: build with go build -o .build/dit ./cmd/dit"
+command -v dit || echo "MISSING: build the Go CLI from the project root (see README.md)"
 dit store path          # backend, location, account/transaction/ticker counts
 dit help                # full command listing
 dit help <group>        # one group: account, tx, ticker, store, market, quote, pnl
 ```
 
 Help is authoritative and never mutates — prefer it over remembered flags.
-Point at a non-default store with `--store PATH` / `DIT_STORE_URL`, or switch
-backend with `--backend file|sqlite`. Flags work before or after the subcommand.
+The user config at `~/.dit/config.json` sets `DIT_STORE_URL` to
+`~/.dit/portfolio.dat` and `DIT_MARKET_URL` to `~/.dit/market.dat`; use
+`dit config set store PATH` or `dit config set market PATH` to change them.
+Override with `--store PATH` / `DIT_STORE_URL`, or switch backend with
+`--backend file|sqlite`. Precedence is flags > environment > user config >
+defaults. Flags work before or after the subcommand.
 
 ## Fast path for "how is the portfolio doing?"
 
@@ -48,7 +52,7 @@ it first, then drill into whatever it flags; it never writes. Run it with
 dit                                # summary: totals, cash, per-account, holdings (+ needs network for prices)
 dit --offline summary              # same, no network: positions valued at cost, no day-change
 dit accounts                       # registry listing
-dit account show "Questrade" --history    # one account: balances + full chronological ledger
+dit account show "Questrade" --history    # one account: summary-style valuation + full ledger
 dit tx list                        # unfiltered = bank-statement view (Debit/Credit/Balance)
 dit tx list --account TD --kind sell     # filtered = plain list (running balances would lie)
 dit tx show 8CD1E99F               # one transaction in full; ids from `tx list`
@@ -60,9 +64,12 @@ dit pnl --time-series --from 2026-01-01 --to 2026-06-30
 dit market coverage                # audit: which holdings lack usable price history / FX chain
 ```
 
-Prefer the narrowest command that answers the question. `account show` and
-`pnl` never touch the network; plain `dit`/`summary`/`quote`/`market latest`
-do (use `--offline` in a sandbox — note it changes the answer, see below).
+Prefer the narrowest command that answers the question. Text `account show`
+uses live quotes and FX in the account's reporting currency, like `summary`;
+add `--offline` to avoid network and FX. `account show --json` remains a raw
+per-currency cost/ledger view. `pnl` is offline; plain `dit`/`summary`/`quote`/
+`market latest` use the network (use `--offline` in a sandbox — note it changes
+the answer, see below).
 
 ## Machine output (`--json`) — the reading contract
 
@@ -110,6 +117,9 @@ dit tx dividend --account Mercury --ticker BRK.B --amount 12
 dit tx fx      --account TFSA --from CAD --to USD --from-amount 1000 --to-amount 740
 dit tx edit    8CD1E99F --amount 12500 --date 2026-01-16
 dit tx delete  017699AF --yes
+dit backup                         # timestamped portfolio + market + metadata
+dit rollback --list
+dit rollback 20261013.133812 --yes # restore a snapshot (destructive)
 ```
 
 - Omit `--price` on buy/sell to fetch the latest quote; under `--offline` that
@@ -124,7 +134,7 @@ dit tx delete  017699AF --yes
   *recorded with a loud warning*. Report the warning; never invent a balancing
   entry to make numbers tidy.
 - Destructive paths (`tx delete`, `account delete`, `store import` replace,
-  `dit import` replace) need `--yes` on a non-interactive terminal, and
+  `dit import` replace, `dit rollback`) need `--yes` on a non-interactive terminal, and
   `--force` when an account still has a ledger. **Ask the user before running
   any of these, and run `dit store backup` first** (a replace `dit import`
   backs both stores up on its own unless `--force`).

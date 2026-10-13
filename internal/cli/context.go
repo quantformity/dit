@@ -41,6 +41,7 @@ func Runtime(message string) error { return RuntimeError{Message: message} }
 // arguments; nothing is hidden in a package-level mutable state.
 type Context struct {
 	Layout  config.Layout
+	Version string
 	JSON    bool
 	Offline bool
 	Display model.Currency
