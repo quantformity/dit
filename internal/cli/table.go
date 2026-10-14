@@ -86,7 +86,7 @@ func commandSpecs() Registry {
 	// Lane registries last, so a real implementation always beats the
 	// placeholder above it. Placeholders stay: they are how an unported
 	// command announces itself instead of falling through to a wrong answer.
-	return mergeLayers(registry, summarySpecs, txListSpecs, marketSpecs, transferSpecs, txWriteSpecs, pnlSpecs, acctmgktSpecs, quoteSpecs, configSpecs)
+	return mergeLayers(registry, summarySpecs, txListSpecs, marketSpecs, transferSpecs, txWriteSpecs, pnlSpecs, acctmgktSpecs, quoteSpecs, configSpecs, incomeSpecs, txImportSpecs)
 }
 
 func setOf(names ...string) map[string]bool {

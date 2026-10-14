@@ -93,7 +93,10 @@ func decimalPtr(d decimal.Decimal) *decimal.Decimal { return &d }
 // schema and report, not just a few hand-selected amounts. The timestamp is
 // taken from the oracle itself, so clock ticks do not make this test flaky.
 func TestRichStoreOracleOffline(t *testing.T) {
-	const swift = "/opt/homebrew/bin/dit"
+	swift := os.Getenv("DIT_SWIFT_ORACLE")
+	if swift == "" {
+		swift = "/opt/homebrew/bin/dit-swift"
+	}
 	if _, err := os.Stat(swift); err != nil {
 		t.Skip("Swift oracle unavailable")
 	}

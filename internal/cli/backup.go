@@ -422,6 +422,7 @@ func portfolioRollback(c Context, args []string) error {
 	}
 	stamp := ""
 	yes := false
+	dryRun := false
 	for _, arg := range args {
 		if arg == "--yes" {
 			if yes {
@@ -430,8 +431,12 @@ func portfolioRollback(c Context, args []string) error {
 			yes = true
 			continue
 		}
+		if arg == "--dry-run" {
+			dryRun = true
+			continue
+		}
 		if strings.HasPrefix(arg, "-") || stamp != "" {
-			return usage("usage: dit rollback <YYYYMMDD.HHMMSS> [--yes] or dit rollback --list")
+			return usage("usage: dit rollback <YYYYMMDD.HHMMSS> [--dry-run | --yes] or dit rollback --list")
 		}
 		stamp = arg
 	}
@@ -459,19 +464,40 @@ func portfolioRollback(c Context, args []string) error {
 	if err := json.Unmarshal(marketRaw, &market); err != nil {
 		return usage("market backup is invalid: " + err.Error())
 	}
+	if dryRun {
+		c.printf("dry run — nothing written\n")
+		c.printf("  would restore from backup %s: portfolio (%d account(s), %d transaction(s)), market data (%d daily close(s) across %d series)\n", stamp, len(portfolio.Accounts), len(portfolio.Transactions), market.TotalPoints(), len(market.Series))
+		c.printf("  the current stores would be backed up first (unless they are already covered by this backup)\n")
+		return nil
+	}
+	// Snapshot the documents we are about to overwrite BEFORE the confirmation
+	// prompt, so anything that lands during the prompt (a background sync, a
+	// second dit) is caught rather than silently replaced.
+	curP, err := transferRead(c, c.Layout.PortfolioDir, store.PortfolioKey)
+	if err != nil {
+		return Runtime("cannot read the current portfolio before rollback: " + err.Error())
+	}
+	curM, err := transferRead(c, c.Layout.MarketDir, store.MarketKey)
+	if err != nil {
+		return Runtime("cannot read the current market data before rollback: " + err.Error())
+	}
 	if err := transferConfirm(c, fmt.Sprintf("Restore portfolio (%d account(s), %d transaction(s)) and market data from backup %s?", len(portfolio.Accounts), len(portfolio.Transactions), stamp), yes, true); err != nil {
 		return err
 	}
 
 	// Preserve the current documents as a fresh backup before replacing them.
 	preBackup := ""
-	if current, err := transferRead(c, c.Layout.PortfolioDir, store.PortfolioKey); err != nil {
-		return Runtime("cannot read the current portfolio before rollback: " + err.Error())
-	} else if current != nil {
-		preBackup, err = nextBackupStamp(directory), nil
+	if curP != nil {
+		preBackup = nextBackupStamp(directory)
 		if _, err = createBackup(c, preBackup); err != nil {
 			return Runtime("could not back up the current stores before rollback: " + err.Error())
 		}
+	}
+	if err := changedUnderYou(c, curP, c.Layout.PortfolioDir, store.PortfolioKey, "portfolio"); err != nil {
+		return err
+	}
+	if err := changedUnderYou(c, curM, c.Layout.MarketDir, store.MarketKey, "market data"); err != nil {
+		return err
 	}
 	if err := transferSave(c, &portfolio, &market); err != nil {
 		return Runtime("could not restore backup: " + err.Error())

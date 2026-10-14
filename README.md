@@ -23,6 +23,44 @@ The Swift comparison harnesses have been removed; build and test the Go CLI
 with the commands above. `docs/PORT.md` retains the results of the last
 comparison runs.
 
+## Reporting and data tools
+
+Beyond the live summary, `dit` offers past-dated and bulk tools:
+
+- **As-of reports.** `dit summary --as-of DATE` (or `account show NAME --as-of
+  DATE`) replays the ledger to a past day: later transactions are excluded and
+  positions are priced from the last *stored* close on or before that day, never
+  a live quote. `--time-series` (add `--daily` for a day-by-day walk, or bound
+  with `--as-of-from`/`--as-of-to`) prints a net-worth series — unbounded it
+  shows the last twelve month-ends, an explicit window is reported in full.
+  Where no FX rate exists for a past day the converted total is dashed rather
+  than invented.
+- **Income statement.** `dit income [--year YYYY | --since D --to D] [--account
+  A]` lists dividends and GIC interest (cash income) in the window — `--year`
+  means that calendar year, not that year up to today — per currency and never
+  blended across currencies. Trading/realized P&L is `dit pnl`.
+- **Display currency.** `account show` reports in the account's own currency by
+  default; an explicit `--display CCY` overrides that.
+- **Dry runs.** `import`, `store import`, `rollback`, and `tx import` accept
+  `--dry-run`: they validate and report what they *would* change, then write
+  nothing.
+- **Bulk transaction import.** `dit tx import FILE` loads deposits, withdrawals,
+  buys, sells and dividends from CSV. It is all-or-nothing (one malformed row
+  aborts the whole import with the store untouched) and idempotent (rows that
+  match an existing transaction are skipped; `--allow-duplicates` to override).
+- **Changed-under-you guard.** Before a whole-store replace (`import`, `store
+  import`, `rollback`, `tx import`) `dit` re-checks the stored bytes against
+  what it first read and refuses if they changed (a background sync, or a second
+  `dit`), so it never silently clobbers data that arrived mid-command. Set
+  `DIT_ALLOW_CONCURRENT=1` to force the replace anyway. This is detection, not a
+  lock: it cannot make a synced folder safe to write from two machines in the
+  same instant; the automatic pre-replace backup is the recovery path for that.
+
+There is **no second quote provider**, by decision rather than as a gap: the
+market commands use Yahoo (alone with the offline test stub). An alternate
+provider would need a concrete endpoint plus a way to exercise it offline; one
+unverified endpoint was judged worse than none.
+
 ## Backups
 
 `dit backup` writes paired timestamped portfolio and market documents plus

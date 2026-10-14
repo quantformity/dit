@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -25,9 +26,9 @@ var transferSpecs = Registry{
 	"rollback":     {Run: portfolioRollback, SkipParse: true, HelpText: rollbackHelp},
 	"store export": {Run: storeExport, ValueOptions: setOf("to", "account")},
 	"store backup": {Run: storeBackup, ValueOptions: setOf("to")},
-	"store import": {Run: storeImport, FlagOptions: setOf("merge", "force", "yes")},
+	"store import": {Run: storeImport, FlagOptions: setOf("merge", "force", "yes", "dry-run")},
 	"export":       {Run: bundleExport, ValueOptions: setOf("to"), FlagOptions: setOf("portfolio-only", "market-only")},
-	"import":       {Run: bundleImport, FlagOptions: setOf("merge", "force", "yes")},
+	"import":       {Run: bundleImport, FlagOptions: setOf("merge", "force", "yes", "dry-run")},
 }
 
 func fileStamp() string { return time.Now().UTC().Format("20060102-150405") }
@@ -58,7 +59,7 @@ func transferOptions(name string, args []string) (Options, error) {
 	case "export":
 		return ParseOptions(args, setOf("to"), setOf("portfolio-only", "market-only"))
 	default:
-		return ParseOptions(args, nil, setOf("merge", "force", "yes"))
+		return ParseOptions(args, nil, setOf("merge", "force", "yes", "dry-run"))
 	}
 }
 func transferTarget(c Context, o Options, prefix string) string {
@@ -129,6 +130,33 @@ func transferLoad(c Context) (*model.Portfolio, model.MarketData, error) {
 	m, err := transferMarket(c)
 	return p, m, err
 }
+
+// changedUnderYou reports whether the store still holds the bytes it did at
+// the start of a replace operation, so a replace never silently clobbers data
+// that appeared while the user was reading the confirmation prompt or a
+// background sync was landing.
+//
+// This is detection, not a lock: it compares the whole document byte-for-byte
+// against what this command read, which catches a sync that completed or a
+// second `dit` that committed during the command. It cannot make a synced
+// folder safe to write from two machines at the same instant, and it does not
+// try to — the pre-replace backup remains the recovery path for that. A user
+// who genuinely means to overwrite (for example a deliberate restore onto a
+// store they know changed) sets DIT_ALLOW_CONCURRENT=1.
+func changedUnderYou(c Context, original []byte, path, key, label string) error {
+	if os.Getenv("DIT_ALLOW_CONCURRENT") != "" {
+		return nil
+	}
+	now, err := transferRead(c, path, key)
+	if err != nil {
+		return Runtime("could not re-check the " + label + " before replacing it: " + err.Error())
+	}
+	if !bytes.Equal(now, original) {
+		return Runtime("the " + label + " changed since this command read it — nothing was replaced, to avoid overwriting data that arrived in the meantime. Re-run to replace the current contents, or set DIT_ALLOW_CONCURRENT=1 to overwrite anyway.")
+	}
+	return nil
+}
+
 func displayAccount(a model.Account) string {
 	if a.Name != nil && strings.TrimSpace(*a.Name) != "" {
 		return strings.TrimSpace(*a.Name)
@@ -367,6 +395,16 @@ func bundleImport(c Context, args []string) error {
 	if p == nil {
 		p = &model.Portfolio{}
 	}
+	// Fingerprint the current stores now, so a replace can refuse to overwrite
+	// anything that changed while the user was answering the prompt.
+	origP, err := transferRead(c, c.Layout.PortfolioDir, store.PortfolioKey)
+	if err != nil {
+		return err
+	}
+	origM, err := transferRead(c, c.Layout.MarketDir, store.MarketKey)
+	if err != nil {
+		return err
+	}
 	mode := bundle.Replace
 	if o.Has("merge") {
 		mode = bundle.Merge
@@ -374,6 +412,20 @@ func bundleImport(c Context, args []string) error {
 	applied, err := bundle.Apply(d, *p, m, mode)
 	if err != nil {
 		return usage(err.Error())
+	}
+	if o.Has("dry-run") {
+		label := "replace"
+		if mode == bundle.Merge {
+			label = "merge"
+		}
+		c.printf("dry run (%s) — nothing written\n", label)
+		for _, n := range applied.Notes {
+			c.printf("  planned: %s\n", n)
+		}
+		if !applied.WritesPortfolio && !applied.WritesMarket {
+			c.printf("  (nothing to change)\n")
+		}
+		return nil
 	}
 	if mode == bundle.Replace {
 		changes := []string{}
@@ -406,6 +458,16 @@ func bundleImport(c Context, args []string) error {
 	}
 	if applied.WritesMarket {
 		prices = &applied.Market
+	}
+	if ledger != nil {
+		if err = changedUnderYou(c, origP, c.Layout.PortfolioDir, store.PortfolioKey, "portfolio"); err != nil {
+			return err
+		}
+	}
+	if prices != nil {
+		if err = changedUnderYou(c, origM, c.Layout.MarketDir, store.MarketKey, "market data"); err != nil {
+			return err
+		}
 	}
 	if err = transferSave(c, ledger, prices); err != nil {
 		return Runtime("could not write the stores: " + err.Error())
@@ -451,6 +513,12 @@ func storeImport(c Context, args []string) error {
 	}
 	if current == nil {
 		current = &model.Portfolio{}
+	}
+	// Snapshot the current ledger bytes for the changed-under-you guard, so a
+	// merge or replace never overwrites a ledger that changed since we read it.
+	origP, err := transferRead(c, c.Layout.PortfolioDir, store.PortfolioKey)
+	if err != nil {
+		return err
 	}
 	// Copy slices before appending or removing: apply must not mutate the loaded value.
 	result := model.Portfolio{Accounts: append([]model.Account{}, current.Accounts...), Transactions: append([]model.Transaction{}, current.Transactions...), Tickers: append([]model.EquityTicker{}, current.Tickers...)}
@@ -517,23 +585,32 @@ func storeImport(c Context, args []string) error {
 		}
 		result.Transactions = append(kept, incoming.Transactions...)
 		note = fmt.Sprintf("imported (replace) '%s': %d transaction(s) from the file replaced %d previously recorded for that account", displayAccount(a), len(incoming.Transactions), removed)
-		if err = transferConfirm(c, fmt.Sprintf("Replace the record and ledger of '%s' with %d imported transaction(s)?", displayAccount(a), len(incoming.Transactions)), o.Has("yes"), false); err != nil {
-			return err
-		}
-		if !o.Has("force") {
-			copies, err := backupConfiguration(c.Layout.Backend, c.Layout.PortfolioDir, "", true)
-			if err != nil {
-				fmt.Fprintf(c.Err, "warning: automatic pre-import backup failed: %v — continuing without a backup\n", err)
-			} else {
-				c.printf("Store backed up before import:\n")
-				for _, p := range copies {
-					c.printf("  → %s\n", p)
+		if !o.Has("dry-run") {
+			if err = transferConfirm(c, fmt.Sprintf("Replace the record and ledger of '%s' with %d imported transaction(s)?", displayAccount(a), len(incoming.Transactions)), o.Has("yes"), false); err != nil {
+				return err
+			}
+			if !o.Has("force") {
+				copies, err := backupConfiguration(c.Layout.Backend, c.Layout.PortfolioDir, "", true)
+				if err != nil {
+					fmt.Fprintf(c.Err, "warning: automatic pre-import backup failed: %v — continuing without a backup\n", err)
+				} else {
+					c.printf("Store backed up before import:\n")
+					for _, p := range copies {
+						c.printf("  → %s\n", p)
+					}
 				}
 			}
 		}
 	}
 	if added > 0 {
 		note += fmt.Sprintf("; %d new ticker(s) registered", added)
+	}
+	if o.Has("dry-run") {
+		c.printf("dry run — no changes written\n  planned: %s\n", note)
+		return nil
+	}
+	if err = changedUnderYou(c, origP, c.Layout.PortfolioDir, store.PortfolioKey, "portfolio"); err != nil {
+		return err
 	}
 	if err = transferSave(c, &result, nil); err != nil {
 		return Runtime("could not save the portfolio: " + err.Error())

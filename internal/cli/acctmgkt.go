@@ -35,6 +35,7 @@ func makeAcctmgktSpecs() Registry {
 		case "account delete":
 			s.FlagOptions = setOf("force", "yes")
 		case "account show":
+			s.ValueOptions = setOf("as-of")
 			s.FlagOptions = setOf("history")
 		case "ticker add", "ticker edit":
 			s.ValueOptions = setOf("name", "currency", "tags", "notes")
@@ -609,18 +610,40 @@ func accountShow(c Context, args []string) error {
 		}
 		return nil
 	}}
-	b := valuation.AccountBalance(a, txs, mark, model.Day(1<<62))
+	reportDay := model.Day(1 << 62)
+	asOfLabel := ""
+	if raw, ok := o.Values["as-of"]; ok {
+		d, e := model.ParseDay(raw)
+		if e != nil || len(raw) != 10 || d.String() != raw {
+			return usage("invalid date '" + raw + "' for --as-of — expected YYYY-MM-DD")
+		}
+		reportDay = d
+		asOfLabel = raw
+	}
+	b := valuation.AccountBalance(a, txs, mark, reportDay)
 	if c.JSON {
-		return managementAccountJSON(c, a, b, txs, o.Has("history"))
+		return managementAccountJSON(c, a, b, txs, o.Has("history"), asOfLabel)
 	}
 	now := time.Now()
 	scoped := &model.Portfolio{Accounts: []model.Account{a}, Transactions: txs, Tickers: p.Tickers}
-	day := model.Day(model.DayStartUTC(now.Unix()))
 	display := a.ReportingCurrency
+	if c.DisplaySet && c.Display != "" {
+		display = c.Display
+	}
+	day := model.Day(model.DayStartUTC(now.Unix()))
 	notes := []string{}
 	var summary valuation.Summary
 	stalePriced := false
-	if c.Offline {
+	isAsOf := asOfLabel != ""
+	if isAsOf {
+		// A past date has no live quote: replay to that day at the last stored
+		// close on or before it, converting at that day's FX (dashed where none
+		// exists). No network.
+		day = reportDay
+		market := loadStoredMarketForAsOf(c)
+		summary = valuation.Compute(scoped, market, display, day)
+		notes = append(notes, "as of "+day.String()+": replayed to that date at the last stored close on or before it, with no live prices and no cross-currency conversion where no historical rate exists")
+	} else if c.Offline {
 		summary = valuation.CostSummary(scoped, display, day)
 		notes = append(notes, "offline mode: positions at cost basis, no FX conversion")
 	} else {
@@ -633,13 +656,17 @@ func accountShow(c Context, args []string) error {
 	for _, short := range summary.Shorts {
 		notes = append(notes, fmt.Sprintf("untracked short: %s sold %s %s (%s) beyond its holding — cash shows the proceeds, the short itself is not tracked, so totals here are incomplete", short.AccountName, summaryQuantity(short.Shares), short.Symbol, short.Currency))
 	}
-	if stalePriced {
-		c.printf("No live quote could be fetched. Positions below are priced from stored closes, " +
-			"which are NOT today's prices — see Notes.\n\n")
+	if isAsOf {
+		c.printf("%s\n", renderAsOfSnapshot(summary, day, string(display), notes, boldHeaders(c), "Account summary — "+displayAccount(a)))
+	} else {
+		if stalePriced {
+			c.printf("No live quote could be fetched. Positions below are priced from stored closes, " +
+				"which are NOT today's prices — see Notes.\n\n")
+		}
+		report := RenderSummary(summary, now, notes, boldHeaders(c))
+		report = strings.Replace(report, "Portfolio summary —", "Account summary — "+displayAccount(a)+" —", 1)
+		c.printf("%s\n", report)
 	}
-	report := RenderSummary(summary, now, notes, boldHeaders(c))
-	report = strings.Replace(report, "Portfolio summary —", "Account summary — "+displayAccount(a)+" —", 1)
-	c.printf("%s\n", report)
 
 	c.printf("\nAccount details:\n  ID:        %s\n", strings.ToUpper(a.ID))
 	if a.Institution != nil {
@@ -695,7 +722,7 @@ func managementAmounts(values valuation.Amounts) string {
 	}
 	return strings.Join(out, ", ")
 }
-func managementAccountJSON(c Context, a model.Account, b valuation.Account, txs []model.Transaction, history bool) error {
+func managementAccountJSON(c Context, a model.Account, b valuation.Account, txs []model.Transaction, history bool, asOf string) error {
 	amounts := func(m valuation.Amounts) map[string]string {
 		out := map[string]string{}
 		for c, v := range m {
@@ -716,6 +743,10 @@ func managementAccountJSON(c Context, a model.Account, b valuation.Account, txs 
 		shorts = append(shorts, map[string]any{"ccy": string(s.Currency), "shares": summaryQuantity(s.Shares), "symbol": s.Symbol})
 	}
 	data := map[string]any{"account": map[string]any{"currency": string(a.ReportingCurrency), "id": strings.ToUpper(a.ID), "name": displayAccount(a), "status": status, "taxable": a.Taxable}, "balances": map[string]any{"cashByCurrency": amounts(b.CashByCurrency), "dayChangeByCurrency": amounts(b.DayByCurrency), "dividendsByCurrency": amounts(b.DividendsByCurrency), "gicByCurrency": amounts(b.GICByCurrency), "realizedPnlByCurrency": amounts(b.RealizedByCurrency), "unrealizedPnlByCurrency": amounts(b.UnrealizedByCurrency)}, "positions": positions, "untrackedShorts": shorts}
+	if asOf != "" {
+		data["asOf"] = asOf
+		data["mode"] = "as-of"
+	}
 	if history {
 		rows := []any{}
 		for _, tx := range txs {

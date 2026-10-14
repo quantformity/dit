@@ -76,4 +76,5 @@ if [ -n "$DAYS" ]; then
 else
   run_json "P&L — whole ledger" pnl
 fi
+run_json "Income — dividends + GIC interest (per currency, not blended)" income
 echo "_Dashes are unknowns, not zeros. A DERIVED / backfilled figure is a model, not a quote._"

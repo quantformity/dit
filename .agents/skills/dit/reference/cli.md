@@ -27,12 +27,23 @@ there on first initialization and left intact.
 Exit codes: **0** success · **1** runtime error (state conflict, lookup
 failure, store I/O, no data at all for the request) · **2** usage error.
 
+Market data comes from **Yahoo only** (plus an offline test stub via
+`DIT_PROVIDER_STUB`); there is no second provider. Whole-store replaces
+(`import`, `store import`, `rollback`, `tx import`) run a **changed-under-you**
+check: if the store changed after the command read it, the write is refused
+unless `DIT_ALLOW_CONCURRENT=1`. This catches a background sync or a second
+`dit` that landed new data mid-command; it is detection, not a lock.
+
 ## Summary
 
 ```
 dit                                   # = dit summary
 dit summary --display usd
 dit --offline summary                 # no quotes: holdings at cost, day-change dashed
+dit summary --as-of 2024-06-17       # replay the ledger to a past day (no network)
+dit summary --time-series            # net-worth series: last 12 month-ends by
+                                     # default; an explicit window is shown in full
+dit summary --daily --as-of-from D --as-of-to D   # day-by-day series over a window
 ```
 
 Prints total value, cash by currency, per-account totals, holdings with
@@ -42,16 +53,39 @@ position's own trading currency; other money columns use the display currency.
 compares the latest quote against the last stored close strictly older than
 the quote's day; no pair → dashed, never `0.00`.
 
+**As-of mode** (`--as-of`, or a `--time-series`/`--daily` window) never fetches:
+it prices each day from the last *stored* close on or before it and converts at
+that day's FX rate, dashing the converted total when no historical rate exists
+(a series prints one row per reported day). Use it for "what did I hold / what
+was I worth then?", not for today's market. `--as-of-from`/`--as-of-to` imply a
+series even without `--time-series`, and a window whose end precedes its start
+is a usage error rather than an empty report.
+
+## Income
+
+```
+dit income                                   # current calendar year to today
+dit income --year 2025                       # that calendar year only
+dit income --since 2025-01-01 --to 2025-06-30
+dit income --account TFSA[,Margin] [--json]
+```
+
+Cash income (dividends net of fees, GIC interest above principal) over the
+window, listed oldest first and totalled **per currency, never blended** (a
+single cross-currency total would need an FX rate that may not exist for the pay
+date). Trading and GIC realized P&L are capital results → `dit pnl`. Reads the
+ledger only (works offline).
+
 ## Accounts
 
 ```
 dit accounts
-dit account show <account> [--history]       # live valuation in account currency; --offline = cost basis/no FX
+dit account show <account> [--history] [--as-of D] [--display CCY]   # live valuation in account currency; --offline = cost basis/no FX; --as-of replays to a past day; explicit --display overrides the account currency
 dit config set store PATH                   # change DIT_STORE_URL in ~/.dit/config.json
 dit config set market PATH                  # change DIT_MARKET_URL in ~/.dit/config.json
 dit backup                                  # timestamped portfolio+market backup + metadata
 dit rollback --list                         # list available backup timestamps
-dit rollback YYYYMMDD.HHMMSS [--yes]        # restore that snapshot
+dit rollback YYYYMMDD.HHMMSS [--yes] [--dry-run]   # restore that snapshot (destructive; --dry-run previews)
 dit account add    --currency CCY [--name --institution --number --taxable --non-taxable --opened D --closed D --notes T]
 dit account edit   <account> [same options]
 dit account close  <account> [--date D]
@@ -84,7 +118,16 @@ dit tx gic-redeem --account A --gic NAME|ID --proceeds N [--currency CCY] [--fee
 dit tx fx        --account A --from CCY --to CCY --from-amount N --to-amount M [--fee F]
 dit tx edit <id> [--date D] [--fee F] [value options]
 dit tx delete <id> [--yes]
+dit tx import FILE [--dry-run] [--allow-duplicates]   # bulk CSV: date,account,type,ticker,currency,quantity,price,amount,fee,notes
 ```
+
+`tx import` takes deposit/withdraw/buy/sell/dividend rows from CSV. It is
+**all-or-nothing** (one malformed row — bad date, unknown account, missing value
+— aborts the whole import with the store untouched) and **idempotent** (a row
+that matches an existing transaction, or an earlier row in the same file, is
+skipped; `--allow-duplicates` disables that). Trades carry their own `price` —
+the importer never fetches. GIC/FX rows are refused (they reference other
+records; use `tx gic`/`tx fx`). See `dit help tx import`.
 
 - Unfiltered `tx list` = **statement view** (Debit / Credit / running Balance
   per account and currency). Any filter = plain list, because running balances
@@ -121,7 +164,7 @@ never touches the ledger. Deleting a referenced entry is gated by confirmation.
 dit store path
 dit store export [--to FILE] [--account NAME]     # single-account file is re-importable
 dit store backup [--to DIR]                        # copies db + -wal/-shm sidecars too
-dit store import FILE [--merge] [--force] [--yes]
+dit store import FILE [--merge] [--force] [--yes] [--dry-run]
 ```
 
 Import is single-account. Default = **replace** that account's record and
@@ -135,7 +178,7 @@ anything is written.
 
 ```
 dit export [--to FILE] [--portfolio-only|--market-only]   # ONE file: ledger + prices
-dit import FILE [--merge] [--force] [--yes]
+dit import FILE [--merge] [--force] [--yes] [--dry-run]
 ```
 
 A DIFFERENT format from `store export`/`store import` (those move one

@@ -92,19 +92,20 @@ const defaultDisplay = "CAD"
 // through the same path a real invocation takes.
 func newContext(global globals, layout config.Layout, stdout io.Writer, stderr io.Writer) cli.Context {
 	return cli.Context{
-		Layout:  layout,
-		Version: version,
-		JSON:    global.json,
-		Offline: global.offline,
-		Display: cli.DisplayCurrency(global.display),
-		Out:     stdout,
-		Err:     stderr,
+		Layout:     layout,
+		Version:    version,
+		JSON:       global.json,
+		Offline:    global.offline,
+		Display:    cli.DisplayCurrency(global.display),
+		DisplaySet: global.displaySet,
+		Out:        stdout,
+		Err:        stderr,
 	}
 }
 
 type globals struct {
 	backend, store, market, display string
-	offline, json                   bool
+	offline, json, displaySet       bool
 }
 
 // parseGlobals lifts the global options out of the argument list and keeps the
@@ -130,6 +131,7 @@ func parseGlobals(arguments []string) (globals, []string, error) {
 			switch name {
 			case "--display":
 				found.display = value
+				found.displaySet = true
 			case "--store":
 				found.store = value
 			case "--market-store":

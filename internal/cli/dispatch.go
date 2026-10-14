@@ -218,7 +218,7 @@ func looksLikeTransactionID(word string) bool {
 // schema exists, and is a usage error everywhere else.
 func jsonIsDocumented(name string) bool {
 	switch name {
-	case "", "summary", "accounts", "account list", "account show", "quote", "pnl", "market coverage":
+	case "", "summary", "accounts", "account list", "account show", "quote", "pnl", "income", "market coverage":
 		return true
 	}
 	return false

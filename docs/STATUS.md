@@ -24,4 +24,26 @@ The comparison scripts have been removed; these figures are historical. Live
 prices and timestamps varied between sequential requests, while the offline
 scenario suite was deterministic.
 
+## Features added after the port
+
+These are Go-side additions with no Swift counterpart (so the byte-for-byte
+parity figures above do not cover them); each is covered by its own Go tests:
+
+- As-of / historical reports: `summary --as-of`, `--time-series`, `--daily`,
+  `account show --as-of`. Store-only; dashes FX it cannot source.
+- `dit income [--year|--since|--to] [--account]` — dividends + GIC interest,
+  per currency. `--year` means that calendar year (a future year is an empty
+  window, not an error).
+- `--display` override on `account show` (and a `main.go` fix: `DisplaySet` was
+  never set, so the override had been inert).
+- `--dry-run` on `import`, `store import`, `rollback`.
+- `dit tx import` — bulk CSV, all-or-nothing, idempotent, offline.
+- Changed-under-you guard on whole-store replaces (`DIT_ALLOW_CONCURRENT=1` to
+  override).
+
+**Not wanted:** a second quote provider. Market commands use Yahoo only, and
+that is a decision, not a gap — an alternate provider would need a concrete
+endpoint plus an offline way to exercise it, and an unverified endpoint was
+rejected as worse than not shipping one.
+
 See [PORT.md](PORT.md) for port notes and remaining behavioral distinctions.

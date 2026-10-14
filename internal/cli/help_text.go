@@ -481,6 +481,55 @@ const helpBody16 = `USAGE: dit [command] [options]
   environment variables. Exit codes: 0 success, 1 runtime
   error, 2 usage error.`
 
+const incomeHelp = `USAGE: dit income [--year YYYY | --since DATE --to DATE] [--account A[,A...]] [--json]
+
+  Cash income over a window: dividends (net of fees) and GIC
+  interest (proceeds above the redeemed principal), listed oldest
+  first and totalled per currency. Trading and GIC realized P&L
+  are capital results, not income — see 'dit pnl' for those.
+
+  Amounts stay in the currency paid; a window spanning more than
+  one currency is totalled per currency and never blended into one
+  figure. Default window: the current calendar year to today.
+  Reads the ledger only; makes no network calls (works offline).
+
+  Examples:
+    dit income
+    dit income --year 2025
+    dit income --since 2025-01-01 --to 2025-06-30
+    dit income --account TFSA --account Margin
+    dit income --year 2025 --json`
+
+const txImportHelp = `USAGE: dit tx import FILE [--dry-run] [--allow-duplicates]
+
+  Bulk-load transactions from a CSV file. Columns (a header line
+  is optional, but if present it must be exactly these names):
+
+    date,account,type,ticker,currency,quantity,price,amount,fee,notes
+
+  Types: deposit, withdraw, buy, sell, dividend. A buy or sell
+  needs ticker, quantity (shares) and price (record the price you
+  paid; the importer never fetches). A dividend needs ticker and
+  amount. currency defaults to the ticker's registered currency,
+  else the account's reporting currency. fee is separate from and
+  deducted out of amount.
+
+  GICs and FX conversions reference other records, so they are not
+  in the CSV path — use 'dit tx gic', 'dit tx gic-redeem' and
+  'dit tx fx'.
+
+  The import is all-or-nothing: if any row is malformed (bad date,
+  unknown account, missing value) the whole import aborts and the
+  store is left exactly as it was. Duplicate rows — matching a
+  transaction already in the ledger or earlier in the same file —
+  are skipped, so re-running an import is safe; --allow-duplicates
+  turns that off. --dry-run validates and reports without writing.
+
+  Examples:
+    dit tx import trades.csv --dry-run
+    dit tx import trades.csv
+    dit tx import 2024-restate.csv --allow-duplicates`
+
 // helpTextFor answers (group, sub) exactly like the Swift helpText(for:)
 // switch: same keys, same order, and anything unknown falls through to
 // the Swift default body (helpBody16), never to an error.
@@ -511,6 +560,24 @@ func helpTextFor(group, sub string) string {
 	}
 	if group == "account" && sub == "delete" {
 		return helpBody8
+	}
+	if group == "income" {
+		return incomeHelp
+	}
+	if group == "tx" && sub == "import" {
+		return txImportHelp
+	}
+	if group == "transaction" && sub == "import" {
+		return txImportHelp
+	}
+	if group == "income" {
+		return incomeHelp
+	}
+	if group == "tx" && sub == "import" {
+		return txImportHelp
+	}
+	if group == "transaction" && sub == "import" {
+		return txImportHelp
 	}
 	if group == "tx" {
 		return helpBody9

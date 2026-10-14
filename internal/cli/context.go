@@ -45,8 +45,13 @@ type Context struct {
 	JSON    bool
 	Offline bool
 	Display model.Currency
-	Out     io.Writer
-	Err     io.Writer
+	// DisplaySet records whether --display was given explicitly. A command
+	// that defaults to something other than the global display (account show
+	// reports in the account's own currency) uses this to tell "no --display"
+	// from "--display CAD" when CAD happens to be the default too.
+	DisplaySet bool
+	Out        io.Writer
+	Err        io.Writer
 }
 
 // Stores opens both documents' backing stores.

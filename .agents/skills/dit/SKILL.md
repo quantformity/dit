@@ -1,6 +1,6 @@
 ---
 name: dit
-description: Read and write a personal investment portfolio through the `dit` CLI — accounts, cash, trades, dividends, GICs, FX conversions, live and stored quotes, historical P&L, and market-data coverage audits. Use when asked about holdings, balances, cost basis, dividends, FX rates, or portfolio P&L, or when recording or correcting investment transactions. Needs the `dit` binary on PATH.
+description: Read and write a personal investment portfolio through the `dit` CLI — accounts, cash, trades, dividends, GICs, FX conversions, live and stored quotes, as-of (past-dated) net worth, historical P&L and income, bulk CSV transaction import, and market-data coverage audits. Use when asked about holdings, balances, cost basis, dividends, FX rates, portfolio P&L or income, what the portfolio looked like on a past date, or when recording, correcting, or bulk-importing investment transactions. Needs the `dit` binary on PATH.
 ---
 
 # dit — portfolio ledger CLI
@@ -61,6 +61,10 @@ dit quote AAPL USD/CAD             # LIVE prices + FX (needs network)
 dit quote TSLA --from 2026-09-01 --to 2026-09-30   # stored series, no network
 dit pnl --horizon 3m               # historical P&L, store-only, never fetches
 dit pnl --time-series --from 2026-01-01 --to 2026-06-30
+dit summary --as-of 2024-06-17     # what the portfolio looked like then (no network)
+dit summary --time-series          # net-worth over time; --daily and --as-of-from/--to to shape it
+dit income --year 2025             # dividends + GIC interest in THAT year, per currency
+dit income --since 2025-01-01 --to 2025-06-30 --account TFSA
 dit market coverage                # audit: which holdings lack usable price history / FX chain
 ```
 
@@ -73,11 +77,14 @@ the answer, see below).
 
 ## Machine output (`--json`) — the reading contract
 
-Supported: `summary`, `accounts`, `account show`, `quote`, `pnl`,
-`market coverage`. **Everything else refuses with exit 2** — do not add
-`--json` to a write command and read the failure as a success. (`tx pnl`
-is listed in `reference/json.md` but is NOT on `main` — it lives on branch
-`feat/tx-pnl`; the main binary rejects it.)
+Supported: `summary` (including `--as-of` and `--time-series`), `accounts`,
+`account show`, `quote`, `pnl`, `income`, `market coverage`. **Everything else
+refuses with exit 2** — do not add `--json` to a write command (or `tx import`)
+and read the failure as a success. (`tx pnl` is listed in `reference/json.md`
+but is NOT on `main` — it lives on branch `feat/tx-pnl`; the main binary rejects
+it.) An as-of summary emits `summary/1` with `"asOf"`/`"mode":"as-of"`; a
+`--time-series` summary emits `networth/1`; `income` emits `income/1` with
+per-currency totals (never a single blended number).
 
 ```bash
 dit --json summary | jq .          # exactly ONE JSON document on stdout, always
@@ -117,6 +124,8 @@ dit tx dividend --account Mercury --ticker BRK.B --amount 12
 dit tx fx      --account TFSA --from CAD --to USD --from-amount 1000 --to-amount 740
 dit tx edit    8CD1E99F --amount 12500 --date 2026-01-16
 dit tx delete  017699AF --yes
+dit tx import trades.csv --dry-run   # preview a bulk CSV load (writes nothing)
+dit tx import trades.csv             # all-or-nothing + idempotent (dupes skipped)
 dit backup                         # timestamped portfolio + market + metadata
 dit rollback --list
 dit rollback 20261013.133812 --yes # restore a snapshot (destructive)
@@ -124,6 +133,11 @@ dit rollback 20261013.133812 --yes # restore a snapshot (destructive)
 
 - Omit `--price` on buy/sell to fetch the latest quote; under `--offline` that
   hard-errors — pass `--price` explicitly instead of dropping the entry.
+- `tx import` CSV columns are exactly
+  `date,account,type,ticker,currency,quantity,price,amount,fee,notes` (ten
+  fields; a header line is optional but must match if present). Trades must
+  carry their own `price` — the importer never fetches. GIC/FX rows are refused;
+  use `tx gic` / `tx gic-redeem` / `tx fx`.
 - `tx edit` changes **values only**. Changing what an entry *is* (kind,
   account, ticker) is delete + re-add, so the correction stays visible.
 - Amounts are plain decimals (`1200.50`, never `1,200.50`); dates are strict
@@ -138,6 +152,12 @@ dit rollback 20261013.133812 --yes # restore a snapshot (destructive)
   `--force` when an account still has a ledger. **Ask the user before running
   any of these, and run `dit store backup` first** (a replace `dit import`
   backs both stores up on its own unless `--force`).
+- `import`, `store import`, `rollback` and `tx import` accept `--dry-run` to see
+  what they would change without writing — use it before any bulk or replace
+  operation. A whole-store replace also refuses if the store changed since the
+  command read it (a `dit import`/`tx import` where new data landed mid-run);
+  that is the changed-under-you guard, and `DIT_ALLOW_CONCURRENT=1` is the only
+  override — use it only when you mean to overwrite.
 - After writes, re-read (`dit tx list --account …`, `dit --offline summary`)
   and confirm what actually got booked instead of trusting the exit code.
 

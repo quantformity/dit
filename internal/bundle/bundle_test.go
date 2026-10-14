@@ -354,7 +354,10 @@ func TestSQLiteRefusalKeepsDatabaseBytes(t *testing.T) {
 }
 
 func TestSwiftReadsGoBundle(t *testing.T) {
-	swift := "/opt/homebrew/bin/dit"
+	swift := os.Getenv("DIT_SWIFT_ORACLE")
+	if swift == "" {
+		swift = "/opt/homebrew/bin/dit-swift"
+	}
 	if _, err := os.Stat(swift); err != nil {
 		t.Skip("Swift oracle unavailable")
 	}

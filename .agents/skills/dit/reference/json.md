@@ -21,9 +21,11 @@ usage (`.kind":"usage"`). Check the exit code *and* `.ok`.
 
 | Command | Schema |
 |---|---|
-| `dit [--offline] --json summary` | `summary/1` |
+| `dit [--offline] --json summary` | `summary/1` (with `--as-of D`: adds `"asOf"`, `"mode":"as-of"`; totals are `null` where no historical FX exists) |
+| `dit --json summary --time-series [--daily]` | `networth/1` (`{"display":…,"series":[{date,total,cash,positions}]}`, values `null` where no historical FX) |
 | `dit --json accounts` | `accounts/1` |
-| `dit --json account show NAME [--history]` | `account/1` |
+| `dit --json account show NAME [--history] [--as-of D]` | `account/1` (with `--as-of`: adds `"asOf"`, `"mode":"as-of"`) |
+| `dit --json income [--year\|--since\|--to] [--account A]` | `income/1` (`{"window",…, "income":[…], "totalsByCurrency":{…}}`; totals per currency, never blended) |
 | `dit --json quote SYM… [--as-of D | --from D --to D]` | `quote/1` (`"mode":"live"|"store"|"series"`) |
 | `dit --json quote CCY/CCY/CCY[/…]` | `quote/1` (`"mode":"matrix"`) |
 | `dit --json pnl [window/filters]` | `pnl/1` |
@@ -31,7 +33,8 @@ usage (`.kind":"usage"`). Check the exit code *and* `.ok`.
 
 Not on `main`: `tx pnl` (`tx-pnl/1`) exists only on branch `feat/tx-pnl`.
 The `main` binary rejects it with "unknown tx subcommand 'pnl'" — check
-`dit help tx` before advising it.
+`dit help tx` before advising it. `tx import` has no `--json` (it is a write
+command; use `--dry-run` to preview).
 
 Everything else refuses with a usage error. `--json` takes no value
 (`--json=1` is a usage error) and is position-independent.

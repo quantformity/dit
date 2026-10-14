@@ -26,8 +26,79 @@ var summarySpecs = Registry{
 
 func summaryCommand(c Context, args []string) error {
 	// The oracle accepts (and ignores) everything after "summary": stray
-	// positionals, unknown flags and all — parity over strictness.
+	// positionals, unknown flags and all — parity over strictness. The as-of
+	// knobs are the one exception: they are recognised here, everything else
+	// is still ignored.
+	cfg, err := parseSummaryRunArgs(args)
+	if err != nil {
+		return err
+	}
+	if cfg.series || cfg.asOf != nil {
+		return summaryHistorical(c, cfg, time.Now())
+	}
 	return summaryRun(c, time.Now())
+}
+
+// summaryHistorical answers an as-of request. It never touches the network:
+// a past date cannot have a live quote, so positions are priced from the last
+// stored close on or before the day and totals convert at that day's FX rate
+// (dashed when no historical rate exists). The replay bounds transactions to
+// the day, so holdings that were later sold or bought back show as they were.
+func summaryHistorical(c Context, cfg summaryRunConfig, now time.Time) error {
+	from, to, err := cfg.resolveWindow(now)
+	if err != nil {
+		return err
+	}
+	p, _, err := summaryLoad(c)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		return emptySummary(c)
+	}
+	if len(p.Accounts) == 0 {
+		if c.JSON {
+			return c.WriteJSON(map[string]any{"ok": true, "schema": "summary/1", "data": map[string]any{"empty": true, "note": "the portfolio has no accounts yet"}})
+		}
+		c.printf("The portfolio has no accounts yet.\n")
+		return nil
+	}
+	days := []model.Day{to}
+	if cfg.series {
+		days = cfg.seriesDays(from, to)
+	}
+	market := loadStoredMarketForAsOf(c)
+	display := c.Display
+	if display == "" {
+		display = model.CAD
+	}
+	if cfg.series {
+		snapshots := asOfSeries(p, market, display, days)
+		if c.JSON {
+			rows := []map[string]any{}
+			for i, s := range snapshots {
+				rows = append(rows, map[string]any{"date": days[i].String(), "total": summaryFixed(s.Total, 2), "cash": summaryFixed(s.Cash, 2), "positions": summaryFixed(s.PositionValue, 2)})
+			}
+			return c.WriteJSON(map[string]any{"ok": true, "schema": "networth/1", "data": map[string]any{"display": string(display), "series": rows, "note": "each point replays the ledger to its date; values are dashed where no historical FX rate exists"}})
+		}
+		c.printf("%s\n\nStore: %s\n", renderSeriesAt(days, snapshots, string(display), boldHeaders(c)), c.PortfolioLocation())
+		return nil
+	}
+	s := valuation.Compute(p, market, display, to)
+	notes := []string{"as of " + to.String() + ": replayed from the ledger to that date at the last stored close on or before it, with no live prices and no cross-currency conversion where no historical rate exists"}
+	for _, short := range s.Shorts {
+		notes = append(notes, fmt.Sprintf("untracked short: %s sold %s %s (%s) beyond its holding", short.AccountName, summaryQuantity(short.Shares), short.Symbol, short.Currency))
+	}
+	if c.JSON {
+		doc := SummaryJSON(s, to.DayTime(), c.PortfolioLocation(), notes, true, true)
+		if data, ok := doc["data"].(map[string]any); ok {
+			data["asOf"] = to.String()
+			data["mode"] = "as-of"
+		}
+		return c.WriteJSON(doc)
+	}
+	c.printf("%s\n\nStore: %s\n", renderAsOfSnapshot(s, to, string(display), notes, boldHeaders(c), "Portfolio as of"), c.PortfolioLocation())
+	return nil
 }
 
 // quoteMaxAge is the summary's tolerance for quote age: three days, so that
