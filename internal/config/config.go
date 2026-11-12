@@ -26,12 +26,15 @@ const (
 
 // Environment variable names, shared with the Swift implementation.
 const (
-	BackendEnvKey    = "DIT_BACKEND"
-	StoreURLEnvKey   = "DIT_STORE_URL"
-	MarketURLEnvKey  = "DIT_MARKET_URL"
-	defaultStoreName = "dit"
-	legacyStoreName  = "DirectInvestTracker"
-	configFileName   = "config.json"
+	BackendEnvKey     = "DIT_BACKEND"
+	StoreURLEnvKey    = "DIT_STORE_URL"
+	MarketURLEnvKey   = "DIT_MARKET_URL"
+	RemoteURLEnvKey   = "DIT_REMOTE_URL"
+	RemoteTokenEnvKey = "DIT_REMOTE_TOKEN"
+	RemoteReadOnlyKey = "DIT_REMOTE_READONLY"
+	defaultStoreName  = "dit"
+	legacyStoreName   = "DirectInvestTracker"
+	configFileName    = "config.json"
 )
 
 // Layout is a resolved pair of store locations.
@@ -46,6 +49,13 @@ type Layout struct {
 	PortfolioDir string
 	// MarketDir is the matching location for price data.
 	MarketDir string
+	// RemoteTarget is a saved `dit connect` address (host:port). When set,
+	// commands run against the remote portfolio instead of the local stores.
+	RemoteTarget string
+	// RemoteToken authenticates to that server. Empty means open access.
+	RemoteToken string
+	// RemoteReadOnly records the server's --immutable setting at connect time.
+	RemoteReadOnly bool
 }
 
 // Resolve reads the environment, user config and flags. A missing user config
@@ -107,8 +117,12 @@ func Resolve(environment map[string]string, flagBackend, flagStore, flagMarket s
 		portfolio = fileStoreDirectory(portfolio, "portfolio.dat")
 		market = fileStoreDirectory(market, "market.dat")
 	}
-	return Layout{Backend: Backend(backend), PortfolioDir: portfolio, MarketDir: market,
-		PortfolioLocation: portfolioLocation, MarketLocation: marketLocation}, nil
+	layout := Layout{Backend: Backend(backend), PortfolioDir: portfolio, MarketDir: market,
+		PortfolioLocation: portfolioLocation, MarketLocation: marketLocation}
+	layout.RemoteTarget = strings.TrimSpace(firstNonEmpty(environment[RemoteURLEnvKey], fileConfig.RemoteURL))
+	layout.RemoteToken = strings.TrimSpace(firstNonEmpty(environment[RemoteTokenEnvKey], fileConfig.RemoteToken))
+	layout.RemoteReadOnly = strings.EqualFold(strings.TrimSpace(firstNonEmpty(environment[RemoteReadOnlyKey], fileConfig.RemoteReadOnly)), "true")
+	return layout, nil
 }
 
 func absoluteLocation(location string) string {
@@ -129,9 +143,12 @@ func firstNonEmpty(values ...string) string {
 }
 
 type userConfig struct {
-	Backend   string `json:"DIT_BACKEND,omitempty"`
-	StoreURL  string `json:"DIT_STORE_URL,omitempty"`
-	MarketURL string `json:"DIT_MARKET_URL,omitempty"`
+	Backend        string `json:"DIT_BACKEND,omitempty"`
+	StoreURL       string `json:"DIT_STORE_URL,omitempty"`
+	MarketURL      string `json:"DIT_MARKET_URL,omitempty"`
+	RemoteURL      string `json:"DIT_REMOTE_URL,omitempty"`
+	RemoteToken    string `json:"DIT_REMOTE_TOKEN,omitempty"`
+	RemoteReadOnly string `json:"DIT_REMOTE_READONLY,omitempty"`
 }
 
 func homeDirectory() string {

@@ -58,7 +58,16 @@ type Context struct {
 //
 // A failure here is a runtime error, not a usage error: the user asked for
 // something reasonable and the machine could not provide it.
+//
+// When a remote connection is saved ('dit connect'), the stores are the
+// remote's: every command that loads or saves through here runs against the
+// connected portfolio instead of the local stores.
 func (c Context) Stores() (ledger store.Store, market store.Store, err error) {
+	if conn, connErr := c.remoteConnection(); connErr != nil {
+		return store.Store{}, store.Store{}, connErr
+	} else if conn != nil {
+		return conn.Stores()
+	}
 	if c.Layout.Backend == config.SQLite {
 		ledger, err = store.NewSQLiteStore(c.Layout.PortfolioDir)
 		if err != nil {

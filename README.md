@@ -87,6 +87,43 @@ store is copied there on first initialization when present (the original files
 are preserved). Flags override environment variables, which override the user
 config.
 
+## Network
+
+`dit` can publish its local stores over the network, and commands can run
+against a remote machine's stores:
+
+- **Serving.** `dit serve [PORT]` (default 8348; `--host ADDR` to restrict
+  the bind; Ctrl-C to stop) exposes the local stores over HTTP. Serving is
+  **mutable by default**: connected commands can read AND change the
+  portfolio. Add `--immutable` to serve read-only — reads work, every write
+  is refused. Without `--token`, anyone who can reach the port has access;
+  `--token TOKEN` (or `--token=` to generate and print one) requires
+  authentication. The banner prints the address and the exact
+  `dit connect` line for clients.
+- **Connecting.** `dit connect HOST:PORT [--token TOKEN]` remembers a remote
+  as the active target: subsequent commands (`summary`, `tx`, `pnl`, …) run
+  against that machine's stores, and every result is prefixed with a
+  `━━━ 🌐 REMOTE host:port · mutable ━━━` tag (on stderr in `--json` mode).
+  If the remote is `--immutable`, the connection is recorded read-only and
+  write commands fail fast with a clear error. `dit disconnect` clears the
+  target and returns to the local stores. The target, token and read-only
+  state are saved in `~/.dit/config.json`; `DIT_REMOTE_URL` /
+  `DIT_REMOTE_TOKEN` / `DIT_REMOTE_READONLY` override it. Connecting is a
+  pointer, not a mirror: nothing is copied or changed by connecting.
+- **Cloning.** `dit clone [HOST:PORT] [--yes] [--force]` pulls the remote's
+  whole portfolio (ledger + market data) into the local stores, exactly like
+  `dit import`: the current local stores are backed up first
+  (`--force` skips the backup) and the replacement is confirmed (`--yes`
+  skips it). Cloning writes only the local stores — the remote is never
+  touched — and works against an `--immutable` serve.
+
+While a connection is active, writes go to the REMOTE stores under the same
+rules as local ones: the changed-under-you guard re-checks the remote
+document before a whole-store replace, and the pre-replace backup snapshots
+the remote documents into the local `~/.dit/backup` directory. `dit serve`
+always publishes the local stores of the machine running it — it never goes
+through a saved connection.
+
 ## Layout
 
 ```

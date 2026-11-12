@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"dit/internal/remote"
 	"dit/internal/store"
 )
 
@@ -26,6 +27,17 @@ func storePath(context Context, arguments []string) error {
 	body := []string{
 		"Backend:  " + string(context.Layout.Backend) + " (flags > DIT_BACKEND > default)",
 		"Location: " + context.PortfolioLocation(),
+	}
+	if context.Layout.RemoteTarget != "" {
+		address, _, err := remote.NormalizeTarget(context.Layout.RemoteTarget)
+		if err != nil {
+			address = context.Layout.RemoteTarget
+		}
+		mode := "mutable"
+		if context.Layout.RemoteReadOnly {
+			mode = "read-only"
+		}
+		body = append([]string{"Remote:   " + address + " (" + mode + ")", "Commands run against the remote portfolio — 'dit disconnect' returns to local."}, body...)
 	}
 	if portfolio != nil {
 		body = append(body, fmt.Sprintf(

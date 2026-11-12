@@ -615,5 +615,17 @@ func helpTextFor(group, sub string) string {
 	if group == "rollback" {
 		return rollbackHelp
 	}
+	if group == "serve" {
+		return serveHelp
+	}
+	if group == "clone" {
+		return cloneHelp
+	}
+	if group == "connect" {
+		return connectHelp
+	}
+	if group == "disconnect" {
+		return disconnectHelp
+	}
 	return withConfigCommand(helpBody16)
 }

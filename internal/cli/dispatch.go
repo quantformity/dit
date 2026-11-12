@@ -106,6 +106,12 @@ func Dispatch(context Context, arguments []string) int {
 			return context.Report(err, spec.HelpText)
 		}
 	}
+	// A saved connection means every result below comes from another machine;
+	// the banner says so before the first line of output. Commands that manage
+	// the connection (or the local stores only) name their own target.
+	if context.Layout.RemoteTarget != "" && !remoteBannerExcluded(name) {
+		context.printRemoteBanner()
+	}
 	if err := spec.Run(context, rest); err != nil {
 		if _, refused := err.(coverageStrictJSON); refused {
 			// The coverage document is already on stdout, "complete": false

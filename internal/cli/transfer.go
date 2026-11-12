@@ -76,6 +76,12 @@ func transferTarget(c Context, o Options, prefix string) string {
 // Import must not use Context.Stores: its constructors create directories and
 // sqlite schema even when validation will refuse the file.
 func transferRead(c Context, path, key string) ([]byte, error) {
+	if conn, err := c.remoteConnection(); err != nil {
+		return nil, err
+	} else if conn != nil {
+		raw, _, err := conn.Get(key)
+		return raw, err
+	}
 	if c.Layout.Backend != config.SQLite {
 		raw, err := os.ReadFile(filepath.Join(path, store.SanitizeKey(key)+".dat"))
 		if os.IsNotExist(err) {
@@ -145,6 +151,17 @@ func transferLoad(c Context) (*model.Portfolio, model.MarketData, error) {
 // store they know changed) sets DIT_ALLOW_CONCURRENT=1.
 func changedUnderYou(c Context, original []byte, path, key, label string) error {
 	if os.Getenv("DIT_ALLOW_CONCURRENT") != "" {
+		return nil
+	}
+	if conn, err := c.remoteConnection(); err != nil {
+		return err
+	} else if conn != nil {
+		// The network form of the guard: re-fetch the document and compare,
+		// so a second client that committed while this one was confirming is
+		// caught the same way a local sync would be.
+		if err := conn.VerifyUnchanged(key, original); err != nil {
+			return Runtime(err.Error())
+		}
 		return nil
 	}
 	now, err := transferRead(c, path, key)
@@ -475,7 +492,7 @@ func bundleImport(c Context, args []string) error {
 	for _, n := range applied.Notes {
 		c.printf("%s\n", n)
 	}
-	c.printf("Store: %s\nMarket store: %s\n", absolute(c.Layout.PortfolioDir), absolute(c.Layout.MarketDir))
+	c.printf("Store: %s\nMarket store: %s\n", c.storeLocationLabel(store.PortfolioKey), c.storeLocationLabel(store.MarketKey))
 	return nil
 }
 
@@ -590,13 +607,27 @@ func storeImport(c Context, args []string) error {
 				return err
 			}
 			if !o.Has("force") {
-				copies, err := backupConfiguration(c.Layout.Backend, c.Layout.PortfolioDir, "", true)
-				if err != nil {
-					fmt.Fprintf(c.Err, "warning: automatic pre-import backup failed: %v — continuing without a backup\n", err)
+				if c.Layout.RemoteTarget != "" {
+					// A remote ledger has no local files to copy: snapshot the
+					// remote documents into the local backup directory instead.
+					copies, err := backupForRestore(c)
+					if err != nil {
+						fmt.Fprintf(c.Err, "warning: automatic pre-import backup failed: %v — continuing without a backup\n", err)
+					} else {
+						c.printf("Remote stores backed up before import:\n")
+						for _, p := range copies {
+							c.printf("  → %s\n", p)
+						}
+					}
 				} else {
-					c.printf("Store backed up before import:\n")
-					for _, p := range copies {
-						c.printf("  → %s\n", p)
+					copies, err := backupConfiguration(c.Layout.Backend, c.Layout.PortfolioDir, "", true)
+					if err != nil {
+						fmt.Fprintf(c.Err, "warning: automatic pre-import backup failed: %v — continuing without a backup\n", err)
+					} else {
+						c.printf("Store backed up before import:\n")
+						for _, p := range copies {
+							c.printf("  → %s\n", p)
+						}
 					}
 				}
 			}
@@ -615,7 +646,7 @@ func storeImport(c Context, args []string) error {
 	if err = transferSave(c, &result, nil); err != nil {
 		return Runtime("could not save the portfolio: " + err.Error())
 	}
-	c.printf("%s\nStore: %s\n", note, absolute(c.Layout.PortfolioDir))
+	c.printf("%s\nStore: %s\n", note, c.storeLocationLabel(store.PortfolioKey))
 	return nil
 }
 
@@ -725,6 +756,22 @@ func backupConfiguration(backend config.Backend, path, to string, required bool)
 	return copies, nil
 }
 func backupForRestore(c Context) ([]string, error) {
+	if conn, err := c.remoteConnection(); err != nil {
+		return nil, err
+	} else if conn != nil {
+		// Nothing local to copy: snapshot the remote documents into the local
+		// backup directory instead, so a remote replace still has a recovery
+		// path ('dit rollback') on this machine.
+		directory, err := backupDirectory()
+		if err != nil {
+			return nil, err
+		}
+		pair, err := createBackup(c, nextBackupStamp(directory))
+		if err != nil {
+			return nil, err
+		}
+		return []string{pair.portfolio, pair.market}, nil
+	}
 	copies, err := backupConfiguration(c.Layout.Backend, c.Layout.PortfolioDir, "", false)
 	if err != nil {
 		return nil, err
@@ -763,7 +810,25 @@ func storeBackup(c Context, args []string) error {
 
 // Stage both documents before replacing either. SQLite uses one transaction
 // across attached databases; file stores retain the old bytes for rollback.
+// A saved connection sends the pair to the remote in one request, and the
+// server applies it only if both documents still match what this client read.
 func transferSave(c Context, p *model.Portfolio, m *model.MarketData) error {
+	if conn, err := c.remoteConnection(); err != nil {
+		return err
+	} else if conn != nil {
+		var portfolio, market []byte
+		if p != nil {
+			if portfolio, err = json.Marshal(p); err != nil {
+				return err
+			}
+		}
+		if m != nil {
+			if market, err = json.Marshal(m); err != nil {
+				return err
+			}
+		}
+		return conn.PutDocuments(portfolio, market)
+	}
 	committed := false
 	createdDirs := []string{}
 	defer func() {
