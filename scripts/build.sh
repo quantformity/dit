@@ -1,27 +1,38 @@
 #!/usr/bin/env bash
 # Build the dit CLI.
 #
-#   scripts/build.sh                     host binary          -> .build/dit
-#   scripts/build.sh linux/amd64 ...     cross-compiled       -> .build/dit-<os>-<arch>
+#   scripts/build.sh                      host binary, keeps the current version
+#   scripts/build.sh linux/amd64 ...      cross-compiled binaries
+#   scripts/build.sh --inc-version [TARGETS]
+#                                         also increment the revision in version.txt
 #
-# Each successful build increments the revision in version.txt once (a
-# cross build of several targets counts as one build). The SQLite driver is
-# pure Go (modernc.org/sqlite), so CGO is not required.
+# The version in version.txt is left untouched by default: dev and
+# cross builds stamp the version as-is. Pass --inc-version for a build
+# that is being published (e.g. a GitHub release); the revision is
+# incremented once, and only after all targets build successfully.
+#
+# Targets are GOOS/GOARCH pairs (default: the host platform); non-host
+# binaries go to .build/dit-<os>-<arch>. The SQLite driver is pure Go
+# (modernc.org/sqlite), so CGO is not required.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION_FILE="$ROOT/version.txt"
 cd "$ROOT"
 
+inc_version=false
+targets=()
+for arg in "$@"; do
+  case "$arg" in
+    --inc-version) inc_version=true ;;
+    *) targets+=("$arg") ;;
+  esac
+done
+
 # Targets: explicit GOOS/GOARCH pairs, or the host platform by default.
 HOST_OS="$(go env GOOS)"
 HOST_ARCH="$(go env GOARCH)"
-targets=()
-if [[ $# -gt 0 ]]; then
-  for target in "$@"; do
-    targets+=("$target")
-  done
-else
+if [[ ${#targets[@]} -eq 0 ]]; then
   targets+=("$HOST_OS/$HOST_ARCH")
 fi
 
@@ -33,7 +44,11 @@ fi
 major="${BASH_REMATCH[1]}"
 minor="${BASH_REMATCH[2]}"
 revision="${BASH_REMATCH[3]}"
-next_version="$major.$minor.$((10#$revision + 1))"
+if $inc_version; then
+  next_version="$major.$minor.$((10#$revision + 1))"
+else
+  next_version="$current"
+fi
 build_date="$(date +%Y%m%d.%H%M%S)"
 mkdir -p "$ROOT/.build"
 # Set before the loop so the trap is valid; reassigned per target.
@@ -63,8 +78,10 @@ for target in "${targets[@]}"; do
   built+=("$output")
 done
 
-printf '%s\n' "$next_version" > "$tmp_version"
-mv "$tmp_version" "$VERSION_FILE"
+if $inc_version; then
+  printf '%s\n' "$next_version" > "$tmp_version"
+  mv "$tmp_version" "$VERSION_FILE"
+fi
 for output in "${built[@]}"; do
   printf 'Built dit %s (%s) -> %s\n' "$next_version" "$build_date" "${output#"$ROOT"/}"
 done

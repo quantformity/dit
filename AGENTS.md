@@ -1,5 +1,4 @@
 # Project instructions
 
-- `version.txt` records the version of the most recently successful CLI build, in `major.minor.revision` form.
-- For every CLI build, increment the revision (third number) by one and update `version.txt` only after the build succeeds. Use `scripts/build.sh`; do not run `go build` directly for a project build. Tests do not count as builds.
-- `scripts/build.sh` embeds the version and local build datetime (`YYYYMMDD.HHMMSS`) in the binary and writes `.build/dit`.
+- `version.txt` records the version of the most recent *published* CLI build, in `major.minor.revision` form.
+- Builds use `scripts/build.sh`; do not run `go build` directly for a project build. Tests do not count as builds. By default the script stamps the binary with the version currently in `version.txt` and does not touch it; pass `--inc-version` for a build that will be published (e.g. a GitHub release) to increment the revision, which is written only after the build succeeds.

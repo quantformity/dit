@@ -14,10 +14,14 @@ Requirements: Go 1.27.2 or newer.
 
 ```sh
 go test ./...
-scripts/build.sh                 # increments version.txt, embeds build time, writes .build/dit
+scripts/build.sh                 # build with the version in version.txt (unchanged), writes .build/dit
+scripts/build.sh --inc-version   # for publishing: bump the revision, then build
 .build/dit --version             # dit X.Y.Z (YYYYMMDD.HHMMSS)
 .build/dit help
 ```
+
+`--inc-version` is for builds that go out the door (a GitHub release);
+everyday builds stamp the current version and leave `version.txt` alone.
 
 The Swift comparison harnesses have been removed; build and test the Go CLI
 with the commands above. `docs/PORT.md` retains the results of the last
