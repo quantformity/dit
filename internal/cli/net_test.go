@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"sync"
@@ -407,5 +408,42 @@ func TestReadOnlyRemoteRefusesWrites(t *testing.T) {
 	err = ledger.Save(store.PortfolioKey, oneAccountPortfolio(t))
 	if err == nil || !strings.Contains(err.Error(), "read-only") {
 		t.Errorf("Save on a read-only connection: got %v, want a read-only refusal", err)
+	}
+}
+
+// The serve-side activity log announces a client on first contact, then logs
+// every request with the response status.
+func TestServeRequestLog(t *testing.T) {
+	var out bytes.Buffer
+	ctx := Context{Out: &out, Err: &bytes.Buffer{}}
+	ready := make(chan struct{})
+	close(ready) // the banner has been printed
+	log := &serveRequestLog{c: ctx, ready: ready}
+	handler := log.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+	req.RemoteAddr = "10.0.0.5:51234"
+	res1 := httptest.NewRecorder()
+	handler.ServeHTTP(res1, req)
+
+	got := out.String()
+	if !strings.Contains(got, "10.0.0.5 connected") {
+		t.Errorf("first request did not announce the client:\n%s", got)
+	}
+	if !strings.Contains(got, "GET /api/v1/info") || !strings.Contains(got, "204") {
+		t.Errorf("first request not logged with its status:\n%s", got)
+	}
+
+	out.Reset()
+	res2 := httptest.NewRecorder()
+	handler.ServeHTTP(res2, req)
+	got = out.String()
+	if strings.Contains(got, "connected") {
+		t.Errorf("repeat request from a known client re-announced it:\n%s", got)
+	}
+	if !strings.Contains(got, "GET /api/v1/info") || !strings.Contains(got, "204") {
+		t.Errorf("repeat request not logged:\n%s", got)
 	}
 }

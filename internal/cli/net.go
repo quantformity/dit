@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"dit/internal/bundle"
@@ -80,8 +81,8 @@ func remoteBannerLine(target string, readOnly bool) string {
 }
 
 // storeLocationLabel is the line a command prints after writing: the local
-// path, or the remote address while a connection is active. The key selects
-// the document so the two local stores keep distinct labels.
+// portfolio path or remote address while a connection is active. The key
+// selects the document so the two local stores keep distinct labels.
 func (c Context) storeLocationLabel(key string) string {
 	if c.Layout.RemoteTarget == "" {
 		if key == store.MarketKey {
@@ -163,7 +164,13 @@ func serveCommand(c Context, args []string) error {
 	}
 	defer listener.Close()
 	handler := remote.NewServer(ledger, market, token, o.Has("immutable"), c.Version)
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	// Announce clients as they arrive and log each request, so the person
+	// running the server can see exactly who is reading or changing the
+	// portfolio, in real time.
+	// ready gates the first log line on the banner.
+	ready := make(chan struct{})
+	log := &serveRequestLog{c: c, ready: ready}
+	server := &http.Server{Handler: log.Wrap(handler), ReadHeaderTimeout: 10 * time.Second}
 	serveErr := make(chan error, 1)
 	go func() {
 		serveErr <- server.Serve(listener)
@@ -196,7 +203,9 @@ func serveCommand(c Context, args []string) error {
 		c.printf("   mutable: remote commands can change the portfolio (re-run with --immutable to forbid that)\n")
 	}
 	c.printf("   store: %s\n", lc.PortfolioLocation())
+	c.printf("   client connections and requests are logged as they happen\n")
 	c.printf("   press Ctrl-C to stop\n")
+	close(ready)
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
@@ -212,6 +221,56 @@ func serveCommand(c Context, args []string) error {
 		}
 	}
 	return nil
+}
+
+// serveRequestLog is the serve-side activity log: the first request from a
+// client IP is announced as a connection, and every request (with the
+// server's status) is logged, so the host can see who is reading or changing
+// the portfolio in real time. Clients are keyed by IP, not by the ephemeral
+// socket address: a reconnecting client must not be re-announced. The ready
+// channel (closed once the banner has printed) keeps the log ordered after
+// the banner even if a request arrives before it.
+type serveRequestLog struct {
+	c     Context
+	ready chan struct{}
+	mu    sync.Mutex
+	seen  map[string]bool
+}
+
+// Wrap returns a handler that logs every request, announcing a client on
+// first sight.
+func (l *serveRequestLog) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ip, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			ip = r.RemoteAddr
+		}
+		l.mu.Lock()
+		if l.seen == nil {
+			l.seen = map[string]bool{}
+		}
+		first := !l.seen[ip]
+		l.seen[ip] = true
+		l.mu.Unlock()
+		if first {
+			<-l.ready
+			l.c.printf("🔗 client %s connected\n", ip)
+		}
+		sw := &statusWriter{ResponseWriter: w, status: 200}
+		next.ServeHTTP(sw, r)
+		l.c.printf("→ %s  %s %s  %d\n", ip, r.Method, r.URL.Path, sw.status)
+	})
+}
+
+// statusWriter records the response status for the activity log.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
 }
 
 // serveAddress picks the first non-loopback IPv4 for the user-facing line.
