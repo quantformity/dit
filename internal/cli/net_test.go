@@ -447,3 +447,28 @@ func TestServeRequestLog(t *testing.T) {
 		t.Errorf("repeat request not logged:\n%s", got)
 	}
 }
+
+// A connected client on a machine WITHOUT its own portfolio must read the
+// remote's data, not the empty local store: summary, income, pnl and
+// market coverage all route through the saved connection.
+func TestConnectedClientWithoutLocalPortfolio(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	address := serveLocalPortfolio(t, map[string][]byte{store.PortfolioKey: oneAccountPortfolio(t)}, nil, false)
+	if err := connectCommand(Context{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}}, []string{address}); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	var out bytes.Buffer
+	ctx := Context{Layout: config.Layout{RemoteTarget: address, Backend: config.File}, Out: &out, Err: &bytes.Buffer{}, Version: "0.0.1", Offline: true}
+
+	if err := summaryCommand(ctx, nil); err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	got := out.String()
+	if strings.Contains(got, "No portfolio found") {
+		t.Errorf("summary read the empty local store instead of the remote:\n%s", got)
+	}
+	if !strings.Contains(got, "5.00") {
+		t.Errorf("the remote account's cash did not render:\n%s", got)
+	}
+}

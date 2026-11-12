@@ -1,16 +1,12 @@
 package cli
 
 import (
-	"database/sql"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"dit/internal/config"
 	"dit/internal/decimal"
 	"dit/internal/model"
 	"dit/internal/provider"
@@ -314,31 +310,14 @@ func notesContainFetchFailure(notes []string) bool {
 // a nonexistent portfolio leaves the filesystem unchanged.
 func summaryLoad(c Context) (*model.Portfolio, model.MarketData, error) {
 	readOnly := func(path string) store.Store {
+		// transferRead consults the saved remote connection FIRST and falls
+		// back to the local store (file or SQLite, whichever the client runs):
+		// a connected client on a machine without its own portfolio must read
+		// the remote, never the empty local store. Its local branches are
+		// exactly the reads below, so routing everything through it loses
+		// nothing.
 		return store.Store{Location: path, Load: func(key string) ([]byte, error) {
-			if c.Layout.Backend != config.SQLite {
-				b, err := os.ReadFile(filepath.Join(path, store.SanitizeKey(key)+".dat"))
-				if os.IsNotExist(err) {
-					return nil, nil
-				}
-				return b, err
-			}
-			if _, err := os.Stat(path); os.IsNotExist(err) {
-				return nil, nil
-			} else if err != nil {
-				return nil, err
-			}
-			u := url.URL{Scheme: "file", Path: path}
-			db, err := sql.Open("sqlite", u.String()+"?mode=ro")
-			if err != nil {
-				return nil, err
-			}
-			defer db.Close()
-			var b []byte
-			err = db.QueryRow("SELECT payload FROM store WHERE key = ?", key).Scan(&b)
-			if err == sql.ErrNoRows {
-				return nil, nil
-			}
-			return b, err
+			return transferRead(c, path, key)
 		}}
 	}
 	p, err := store.LoadPortfolio(readOnly(c.Layout.PortfolioDir))

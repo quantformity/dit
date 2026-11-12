@@ -1,18 +1,13 @@
 package cli
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"dit/internal/config"
 	"dit/internal/market"
 	"dit/internal/model"
 	"dit/internal/store"
@@ -28,35 +23,13 @@ var marketSpecs = mergeLayers(marketWriteSpecs, Registry{
 // File-store construction creates directories. Read-only commands instead
 // supply only Load; absent directories must remain absent after inspection.
 func marketReadStores(c Context) (store.Store, store.Store, error) {
-	if c.Layout.Backend == config.SQLite {
-		reader := func(path string) store.Store {
-			return store.Store{Location: path, Load: func(key string) ([]byte, error) {
-				if _, err := os.Stat(path); os.IsNotExist(err) {
-					return nil, nil
-				}
-				u := url.URL{Scheme: "file", Path: path}
-				db, err := sql.Open("sqlite", u.String()+"?mode=ro")
-				if err != nil {
-					return nil, err
-				}
-				defer db.Close()
-				var payload []byte
-				err = db.QueryRow("SELECT payload FROM store WHERE key = ?", key).Scan(&payload)
-				if err == sql.ErrNoRows {
-					return nil, nil
-				}
-				return payload, err
-			}}
-		}
-		return reader(c.Layout.PortfolioDir), reader(c.Layout.MarketDir), nil
-	}
-	reader := func(dir string) store.Store {
-		return store.Store{Location: dir, Load: func(key string) ([]byte, error) {
-			b, err := os.ReadFile(filepath.Join(dir, store.SanitizeKey(key)+".dat"))
-			if os.IsNotExist(err) {
-				return nil, nil
-			}
-			return b, err
+	// Every read goes through transferRead: it consults the saved remote
+	// connection first and falls back to the local store, so a connected
+	// client on a machine without its own portfolio reads the remote, never
+	// the empty local store. The Location keeps the local path for labels.
+	reader := func(path string) store.Store {
+		return store.Store{Location: path, Load: func(key string) ([]byte, error) {
+			return transferRead(c, path, key)
 		}}
 	}
 	return reader(c.Layout.PortfolioDir), reader(c.Layout.MarketDir), nil
