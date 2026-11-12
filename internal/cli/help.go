@@ -18,7 +18,7 @@ func hasFlag(word string) bool { return strings.HasPrefix(word, "-") }
 
 const configCommandHelpLine = "  dit config <sub> [args]    read and update user config (see: dit config --help)"
 const backupCommandHelpLines = "  dit backup                 timestamped backup of portfolio + market data\n  dit rollback <stamp>|--list restore or list timestamped backups"
-const networkCommandHelpLines = "  dit serve [PORT]             serve this portfolio to the network (see: dit serve --help)\n  dit clone [HOST:PORT]        pull a remote portfolio into the local stores\n  dit connect [HOST:PORT]      run commands against a remote portfolio\n  dit disconnect               stop using the connected remote\n  dit self-update [--check]    install the latest dit release (GitHub) over this binary"
+const networkCommandHelpLines = "  dit serve [PORT]             serve this portfolio to the network (see: dit serve --help)\n  dit clone [HOST:PORT]        pull a remote portfolio into the local stores\n  dit connect [HOST:PORT]      run commands against a remote portfolio\n  dit disconnect               stop using the connected remote\n  dit upgrade [--check]    install the latest dit release (GitHub) over this binary"
 
 // withConfigCommand splices the commands that post-date the Swift help screen
 // (config, backup/rollback, and the network commands) into a usage body.

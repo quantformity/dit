@@ -71,10 +71,10 @@ func TestBackupName(t *testing.T) {
 	}
 }
 
-// Full self-update flow against a stub release server: the fake "current"
+// Full upgrade flow against a stub release server: the fake "current"
 // binary is replaced, the previous bytes are backed up as dit.<old version>,
 // and an up-to-date run is a no-op.
-func TestSelfUpdateEndToEnd(t *testing.T) {
+func TestUpgradeEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "dit")
 	oldContent := []byte("#!/bin/sh\necho OLD\n")
@@ -96,13 +96,13 @@ func TestSelfUpdateEndToEnd(t *testing.T) {
 	defer srv.Close()
 	assetURL = srv.URL + "/download/dit-" + runtime.GOOS + "-" + runtime.GOARCH
 	t.Setenv("DIT_RELEASE_API", srv.URL)
-	t.Setenv("DIT_SELF_UPDATE_EXE", exe)
+	t.Setenv("DIT_UPGRADE_EXE", exe)
 
 	var out bytes.Buffer
 	ctx := Context{Out: &out, Err: &bytes.Buffer{}, Version: "0.0.1"}
 
-	if err := selfUpdateCommand(ctx, []string{"--yes"}); err != nil {
-		t.Fatalf("self-update: %v\n%s", err, out.String())
+	if err := upgradeCommand(ctx, []string{"--yes"}); err != nil {
+		t.Fatalf("upgrade: %v\n%s", err, out.String())
 	}
 	// The current binary is now the new one.
 	if data, _ := os.ReadFile(exe); !bytes.Equal(data, newContent) {
@@ -120,8 +120,8 @@ func TestSelfUpdateEndToEnd(t *testing.T) {
 	// Re-running with the current version matching the latest is a no-op.
 	out.Reset()
 	ctx.Version = "0.0.17 (20261112.000000)"
-	if err := selfUpdateCommand(ctx, []string{"--yes"}); err != nil {
-		t.Fatalf("second self-update: %v", err)
+	if err := upgradeCommand(ctx, []string{"--yes"}); err != nil {
+		t.Fatalf("second upgrade: %v", err)
 	}
 	if !strings.Contains(out.String(), "already the latest") {
 		t.Errorf("up-to-date run should be a no-op:\n%s", out.String())
@@ -130,7 +130,7 @@ func TestSelfUpdateEndToEnd(t *testing.T) {
 	// --check reports an available update and changes nothing.
 	out.Reset()
 	ctx.Version = "0.0.1"
-	if err := selfUpdateCommand(ctx, []string{"--check"}); err != nil {
+	if err := upgradeCommand(ctx, []string{"--check"}); err != nil {
 		t.Fatalf("--check: %v", err)
 	}
 	if !strings.Contains(out.String(), "an update is available") {

@@ -627,8 +627,8 @@ func helpTextFor(group, sub string) string {
 	if group == "disconnect" {
 		return disconnectHelp
 	}
-	if group == "self-update" {
-		return selfUpdateHelp
+	if group == "upgrade" {
+		return upgradeHelp
 	}
 	return withConfigCommand(helpBody16)
 }

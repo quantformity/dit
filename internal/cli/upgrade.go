@@ -1,4 +1,4 @@
-// The self-update command: download the latest release from the GitHub
+// The upgrade command: download the latest release from the GitHub
 // releases page, verify it runs, back up the current binary as
 // dit.<old-version> beside it, and replace the running executable.
 //
@@ -20,20 +20,20 @@ import (
 )
 
 // releaseAPIBase is the GitHub REST endpoint for the releases. It is
-// overridable (and the executable, via DIT_SELF_UPDATE_EXE) so the update
+// overridable (and the executable, via DIT_UPGRADE_EXE) so the update
 // flow can be exercised in tests against a stub server.
 const releaseAPIBase = "https://api.github.com/repos/quantformity/dit"
 
-func selfUpdateCommand(c Context, args []string) error {
+func upgradeCommand(c Context, args []string) error {
 	if c.JSON {
-		return usage("--json is not supported for 'self-update' — it prints progress text")
+		return usage("--json is not supported for 'upgrade' — it prints progress text")
 	}
 	o, err := ParseOptions(args, map[string]bool{"version": true}, setOf("check", "yes"))
 	if err != nil {
 		return err
 	}
 	if len(o.Positionals) > 0 {
-		return usage("unexpected argument '" + o.Positionals[0] + "' — usage: dit self-update [--check] [--version VERSION] [--yes]")
+		return usage("unexpected argument '" + o.Positionals[0] + "' — usage: dit upgrade [--check] [--version VERSION] [--yes]")
 	}
 
 	exe, err := executablePath()
@@ -55,7 +55,7 @@ func selfUpdateCommand(c Context, args []string) error {
 		c.printf("current: %s\n", current)
 		c.printf("latest:  v%s (%s)\n", latest, release.Name)
 		if compareVersions(latest, current) > 0 {
-			c.printf("an update is available — run 'dit self-update' to install it\n")
+			c.printf("an update is available — run 'dit upgrade' to install it\n")
 		} else {
 			c.printf("already the latest release — nothing to do\n")
 		}
@@ -116,9 +116,9 @@ func selfUpdateCommand(c Context, args []string) error {
 }
 
 // executablePath is the running binary, resolving the location the
-// replacement must land on. DIT_SELF_UPDATE_EXE overrides it (tests).
+// replacement must land on. DIT_UPGRADE_EXE overrides it (tests).
 func executablePath() (string, error) {
-	if override := os.Getenv("DIT_SELF_UPDATE_EXE"); override != "" {
+	if override := os.Getenv("DIT_UPGRADE_EXE"); override != "" {
 		return absolute(override), nil
 	}
 	exe, err := os.Executable()
@@ -161,7 +161,7 @@ func fetchRelease(tag string) (releaseInfo, error) {
 	if err != nil {
 		return releaseInfo{}, err
 	}
-	req.Header.Set("User-Agent", "dit-self-update")
+	req.Header.Set("User-Agent", "dit-upgrade")
 	// A private release needs credentials: the first token env var that is
 	// set is used (a PAT, or whatever the gh CLI exports).
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
@@ -201,7 +201,7 @@ func downloadAsset(url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", "dit-self-update")
+	req.Header.Set("User-Agent", "dit-upgrade")
 	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
 		if token := os.Getenv(name); token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)

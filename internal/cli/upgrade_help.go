@@ -1,6 +1,6 @@
 package cli
 
-const selfUpdateHelp = `USAGE: dit self-update [--check] [--version VERSION] [--yes]
+const upgradeHelp = `USAGE: dit upgrade [--check] [--version VERSION] [--yes]
 
   Download the latest release of dit from the GitHub releases page and
   replace the running binary in place.

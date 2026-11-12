@@ -29,20 +29,20 @@ import (
 )
 
 var netSpecs = Registry{
-	"serve":       {Run: serveCommand, SkipParse: true, HelpText: serveHelp},
-	"clone":       {Run: cloneCommand, SkipParse: true, HelpText: cloneHelp},
-	"connect":     {Run: connectCommand, SkipParse: true, HelpText: connectHelp},
-	"disconnect":  {Run: disconnectCommand, SkipParse: true, HelpText: disconnectHelp},
-	"self-update": {Run: selfUpdateCommand, SkipParse: true, HelpText: selfUpdateHelp},
+	"serve":      {Run: serveCommand, SkipParse: true, HelpText: serveHelp},
+	"clone":      {Run: cloneCommand, SkipParse: true, HelpText: cloneHelp},
+	"connect":    {Run: connectCommand, SkipParse: true, HelpText: connectHelp},
+	"disconnect": {Run: disconnectCommand, SkipParse: true, HelpText: disconnectHelp},
+	"upgrade":    {Run: upgradeCommand, SkipParse: true, HelpText: upgradeHelp},
 }
 
 // remoteBannerExcluded are the commands that do not run against the saved
 // connection: the connection managers name their own target, serve publishes
-// the local stores, self-update is local housekeeping, and config edits the
+// the local stores, upgrade is local housekeeping, and config edits the
 // local file.
 func remoteBannerExcluded(name string) bool {
 	switch name {
-	case "serve", "connect", "disconnect", "clone", "self-update":
+	case "serve", "connect", "disconnect", "clone", "upgrade":
 		return true
 	}
 	return strings.HasPrefix(name, "config ") || name == "config"
