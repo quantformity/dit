@@ -342,10 +342,13 @@ func verifiedTempBinary(data []byte, version string) (string, error) {
 	return path, nil
 }
 
-// replaceExecutable swaps the new binary into the running location: the old
-// binary is backed up beside it first, and the write lands atomically (temp
-// file in the same directory, then rename over the target). It returns the
-// backup path.
+// replaceExecutable swaps the new binary into the running location and
+// returns the backup path. Windows refuses to overwrite or delete a running
+// executable but (since Vista) allows RENAMING one, so there the backup IS
+// the rename: old image out of the way, new image in, with the old one
+// restored if the second move fails. Everywhere else the old image is
+// copied beside it first and the new one renamed over it (the kernel keeps
+// the running inode alive until the process exits).
 func replaceExecutable(exe, newBinary, oldVersion string) (string, error) {
 	exe, err := filepath.Abs(exe)
 	if err != nil {
@@ -355,15 +358,10 @@ func replaceExecutable(exe, newBinary, oldVersion string) (string, error) {
 		return "", fmt.Errorf("the current binary %s is no longer there: %v", exe, err)
 	}
 
-	backup := filepath.Join(filepath.Dir(exe), backupName(filepath.Base(exe), oldVersion))
-	data, err := os.ReadFile(exe)
-	if err != nil {
-		return "", fmt.Errorf("cannot read the current binary for the backup: %v", err)
-	}
-	if err := os.WriteFile(backup, data, 0o755); err != nil {
-		return "", fmt.Errorf("cannot write the backup %s (the current binary is still in place): %v", backup, err)
-	}
+	backup := uniquePath(filepath.Join(filepath.Dir(exe), backupName(filepath.Base(exe), oldVersion)))
 
+	// The candidate is staged in the target's own directory first, so the
+	// final move is a rename (atomic on every filesystem this can run on).
 	newData, err := os.ReadFile(newBinary)
 	if err != nil {
 		return "", fmt.Errorf("cannot read the downloaded binary: %v", err)
@@ -385,10 +383,48 @@ func replaceExecutable(exe, newBinary, oldVersion string) (string, error) {
 	if err := os.Chmod(tmpName, 0o755); err != nil {
 		return "", fmt.Errorf("cannot make the new binary executable: %v", err)
 	}
+
+	if runtime.GOOS == "windows" {
+		if err := os.Rename(exe, backup); err != nil {
+			return "", fmt.Errorf("cannot move the running binary %s aside (Windows locks running executables — close any other dit processes and retry): %v", exe, err)
+		}
+		if err := os.Rename(tmpName, exe); err != nil {
+			restoreErr := os.Rename(backup, exe)
+			os.Remove(tmpName)
+			if restoreErr != nil {
+				return "", fmt.Errorf("cannot install the new binary (%v) AND restoring the old one FAILED (%v) — %s still holds the previous version; rename it back to %s when this process exits", err, restoreErr, backup, filepath.Base(exe))
+			}
+			return "", fmt.Errorf("cannot install the new binary as %s — the previous one is back in place: %v", exe, err)
+		}
+		return backup, nil
+	}
+
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		return "", fmt.Errorf("cannot read the current binary for the backup: %v", err)
+	}
+	if err := os.WriteFile(backup, data, 0o755); err != nil {
+		return "", fmt.Errorf("cannot write the backup %s (the current binary is still in place): %v", backup, err)
+	}
 	if err := os.Rename(tmpName, exe); err != nil {
 		return "", fmt.Errorf("cannot replace %s (the backup %s is kept either way): %v", exe, backup, err)
 	}
 	return backup, nil
+}
+
+// uniquePath appends -2, -3, ... when the name is already taken, so a
+// repeated upgrade never clobbers the first backup of a version (and the
+// Windows rename-aside never fails on an existing target).
+func uniquePath(path string) string {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return path
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", path, i)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
 }
 
 func sanitizeFilename(s string) string {

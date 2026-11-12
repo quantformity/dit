@@ -14,7 +14,7 @@ const upgradeHelp = `USAGE: dit upgrade [--check] [--version VERSION] [--yes]
   Before the replacement, the new binary is executed with --version: a
   corrupt or wrong-platform download is discarded and the working binary
   is never touched. The existing binary is backed up beside it first —
-  dit.0.0.16 next to dit, dit.exe.0.0.16 on Windows — so rolling back is
+  dit.0.0.16 next to dit, dit.0.0.16 on Windows (dit.exe aside) — so rolling back is
   renaming the backup.
 
   The binary must sit in a directory you can write to; if it cannot be
