@@ -154,6 +154,13 @@ type userConfig struct {
 func homeDirectory() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
+		// Windows: UserHomeDir reads USERPROFILE; keep a second, documented
+		// spelling in case one is stripped from the environment. (On
+		// macOS/Linux the HOME / passwd lookup already failed, so this only
+		// adds the Windows spelling.)
+		if os.Getenv("USERPROFILE") != "" {
+			return os.Getenv("USERPROFILE")
+		}
 		return "."
 	}
 	return home

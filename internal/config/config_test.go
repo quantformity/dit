@@ -122,3 +122,16 @@ func TestDefaultConfigMigratesLegacyDocumentsWithoutRemovingThem(t *testing.T) {
 		t.Fatalf("legacy portfolio was not preserved: %v", err)
 	}
 }
+
+// The default store lives in the user's home directory on every platform
+// (C:\Users\[USER]\.dit on Windows, ~/.dit elsewhere): the config file
+// records ~-relative paths and expandHome resolves them through the home
+// lookup. Pinned here so a Windows-specific location never sneaks in.
+func TestDefaultStoresLiveInHomeDotDit(t *testing.T) {
+	if got, want := expandHome("~/.dit"), filepath.Join(homeDirectory(), ".dit"); got != want {
+		t.Errorf("expandHome(~/.dit) = %q, want %q", got, want)
+	}
+	if !strings.Contains(defaultPortfolioFile(), ".dit") || !strings.HasSuffix(defaultPortfolioFile(), "portfolio.dat") {
+		t.Errorf("default portfolio %q is not under .dit", defaultPortfolioFile())
+	}
+}
