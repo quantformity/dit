@@ -7,14 +7,17 @@
 package cli
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,6 +122,160 @@ func generateToken() (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
+// The run-endpoint allowlist. Reads are always served; the market-write
+// commands (the refetchable price cache) only on a mutable server. The
+// ledger is never written through the endpoint: portfolio editing stays with
+// the CLI on the machine that owns the data.
+var runReadCommands = map[string]bool{
+	"summary": true, "accounts": true, "account list": true, "account show": true,
+	"pnl": true, "income": true, "quote": true,
+	"market coverage": true, "market history": true, "market show": true,
+	"tx list": true, "tx show": true,
+	"ticker list": true, "ticker show": true,
+	"store path": true,
+}
+
+var runWriteCommands = map[string]bool{
+	"market latest":   true,
+	"market backfill": true,
+	"update":          true,
+}
+
+// NewServeRunner builds the in-process command runner for the serve run
+// endpoint: it dispatches commands against the given documents with the given
+// layout (used for the location labels in reports).
+func NewServeRunner(ledger, market store.Store, layout config.Layout, immutable bool, version string) remote.Runner {
+	return &serveRunner{ledger: ledger, market: market, layout: layout, immutable: immutable, version: version}
+}
+
+// serveRunner executes the run endpoint in-process. It runs the command
+// through the same Dispatch the CLI uses, with the served documents
+// installed as Context.StoreSource: the commands read and write exactly the
+// documents the server serves, and the store-opening fallbacks (local files,
+// the saved connection) never fire.
+type serveRunner struct {
+	ledger    store.Store
+	market    store.Store
+	layout    config.Layout
+	immutable bool
+	version   string
+}
+
+// liftRunGlobals extracts the global options the run endpoint controls.
+// --json is always forced — the endpoint exists for machine consumers, so the
+// response is always dit's --json envelope. --offline and --display pass
+// through; every other word stays in place as the command's own argument.
+func liftRunGlobals(args []string) (offline bool, display model.Currency, displaySet bool, rest []string) {
+	display = model.Currency("CAD")
+	rest = make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		name, inline, hasInline := strings.Cut(args[i], "=")
+		switch name {
+		case "--offline":
+			offline = true
+		case "--json":
+			// forced by the endpoint; an explicit --json is a no-op
+		case "--display":
+			value := inline
+			consumed := false
+			if !hasInline {
+				if i+1 >= len(args) {
+					rest = append(rest, args[i]) // malformed; the command's parser reports it
+					continue
+				}
+				i++
+				value = args[i]
+				consumed = true
+			}
+			normalized := strings.ToUpper(strings.TrimSpace(value))
+			for _, known := range KnownDisplayCurrencies() {
+				if string(known) == normalized {
+					display = known
+					displaySet = true
+					break
+				}
+			}
+			if displaySet {
+				continue
+			}
+			// unknown code: pass the words through — the command reports it
+			rest = append(rest, args[i])
+			if consumed {
+				rest = append(rest, value)
+			}
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	return
+}
+
+// runRefusal renders the --json failure envelope a refused command must
+// return: one document, keys alphabetical, matching docs/json.md. Marshalled
+// (not formatted) so the message can carry any characters.
+func runRefusal(kind, message string) (int, string, string) {
+	envelope, _ := json.Marshal(map[string]any{"ok": false, "kind": kind, "error": message})
+	return 2, string(envelope), ""
+}
+
+func (r *serveRunner) Run(args []string) (int, string, string) {
+	name := ResolveCommandName(args)
+	if name == "" {
+		return runRefusal("usage", "no command — the run endpoint takes {\"args\": [\"command\", …]}, e.g. {\"args\": [\"summary\"]}")
+	}
+	if runWriteCommands[name] {
+		if r.immutable {
+			return runRefusal("runtime", "'"+name+"' would change the market data — this server is running with --immutable")
+		}
+	} else if !runReadCommands[name] {
+		return runRefusal("usage", "'"+name+"' is not available on the remote — available: "+r.availableList())
+	}
+	offline, display, displaySet, rest := liftRunGlobals(args)
+	var stdout, stderr bytes.Buffer
+	// --json is forced where a schema is documented; where it is not (the
+	// market-write commands), the command runs in its normal text mode and
+	// the client gets the rendered output verbatim.
+	ctx := Context{
+		Layout:     r.layout,
+		Version:    r.version,
+		JSON:       JSONDocumented(name),
+		Offline:    offline,
+		Display:    display,
+		DisplaySet: displaySet,
+		Out:        &stdout,
+		Err:        &stderr,
+		StoreSource: func() (store.Store, store.Store, error) {
+			return r.ledger, r.market, nil
+		},
+	}
+	code := Dispatch(ctx, rest)
+	return code, stdout.String(), stderr.String()
+}
+
+// KeepsLock reports whether this run mutates the market document, so the
+// server holds its lock for the whole read-modify-write: market-write
+// commands fetch from the network and then save, and a concurrent document
+// PUT landing between the read and the write would be silently lost.
+func (r *serveRunner) KeepsLock(args []string) bool {
+	return !r.immutable && runWriteCommands[ResolveCommandName(args)]
+}
+
+// availableList is the refusal text for THIS server (writes only when it is
+// mutable).
+func (r *serveRunner) availableList() string {
+	var names []string
+	for name := range runReadCommands {
+		names = append(names, "'"+name+"'")
+	}
+	if !r.immutable {
+		for name := range runWriteCommands {
+			names = append(names, "'"+name+"'")
+		}
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
 // serveCommand publishes the local stores: `dit serve [PORT]`.
 func serveCommand(c Context, args []string) error {
 	o, err := ParseOptions(args, map[string]bool{"token": true, "host": true}, map[string]bool{"immutable": true})
@@ -166,6 +323,10 @@ func serveCommand(c Context, args []string) error {
 	}
 	defer listener.Close()
 	handler := remote.NewServer(ledger, market, token, o.Has("immutable"), c.Version)
+	// The run endpoint executes commands in-process on the served documents:
+	// this is what lets a remote UI (the iPhone client) render real dit
+	// reports instead of raw store bytes.
+	handler.SetRunner(NewServeRunner(ledger, market, lc.Layout, o.Has("immutable"), c.Version))
 	// Announce clients as they arrive and log each request, so the person
 	// running the server can see exactly who is reading or changing the
 	// portfolio, in real time.

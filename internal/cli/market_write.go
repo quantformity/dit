@@ -42,6 +42,13 @@ func loadWriteMarket(c Context) (*model.Portfolio, model.MarketData, error) {
 	return p, readMarketCache(raw), nil
 }
 func saveWriteMarket(c Context, d model.MarketData) error {
+	if c.StoreSource != nil {
+		_, market, e := c.StoreSource()
+		if e != nil {
+			return e
+		}
+		return store.SaveMarket(market, &d)
+	}
 	var s store.Store
 	var e error
 	if c.Layout.Backend == "sqlite" {

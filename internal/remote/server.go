@@ -27,12 +27,25 @@ type Server struct {
 	Token     string
 	Immutable bool
 	Version   string
+	// Runner, when set, answers POST /api/v1/run by executing a documented
+	// command in-process against the served documents. The serve command in
+	// internal/cli installs one; a nil Runner means the endpoint answers 501.
+	Runner Runner
 
-	mu sync.Mutex
+	handler http.Handler // the auth-wrapped mux; ServeHTTP delegates
+	mu      sync.Mutex
+}
+
+// Runner executes one documented command in-process against the served
+// documents. stdout is the command's --json envelope (the run endpoint
+// forces machine output); code is the CLI exit code (0 ok / 1 runtime /
+// 2 usage), stderr the diagnostics.
+type Runner interface {
+	Run(args []string) (code int, stdout, stderr string)
 }
 
 // NewServer returns an HTTP handler.
-func NewServer(ledger, market store.Store, token string, immutable bool, version string) http.Handler {
+func NewServer(ledger, market store.Store, token string, immutable bool, version string) *Server {
 	s := &Server{Ledger: ledger, Market: market, Token: strings.TrimSpace(token), Immutable: immutable, Version: version}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/info", s.info)
@@ -40,9 +53,20 @@ func NewServer(ledger, market store.Store, token string, immutable bool, version
 	mux.HandleFunc("PUT /api/v1/store/{key}", s.putDocument)
 	mux.HandleFunc("GET /api/v1/bundle", s.bundle)
 	mux.HandleFunc("PUT /api/v1/documents", s.putDocuments)
+	mux.HandleFunc("POST /api/v1/run", s.runCommand)
 	mux.HandleFunc("/", s.root)
-	return s.auth(mux)
+	s.handler = s.auth(mux)
+	return s
 }
+
+// ServeHTTP implements http.Handler: the auth check runs on every request,
+// including the run endpoint.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
+}
+
+// SetRunner installs the in-process command runner for the run endpoint.
+func (s *Server) SetRunner(runner Runner) { s.Runner = runner }
 
 func (s *Server) root(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet || r.URL.Path != "/" {
@@ -78,7 +102,89 @@ func (s *Server) info(w http.ResponseWriter, r *http.Request) {
 		Version:     s.Version,
 		Immutable:   s.Immutable,
 		AuthEnabled: s.Token != "",
+		Run:         s.Runner != nil,
 	})
+}
+
+// runCommand is the report endpoint for remote UIs: it executes one
+// documented command in-process against the served documents and returns the
+// command's --json envelope as the response body. This is what lets a
+// client on another machine (the iPhone app) get a real dit report without
+// running the engine itself: the portfolio logic stays on the machine that
+// owns the data, and the client stays a dumb renderer.
+//
+//	POST /api/v1/run   {"args": ["summary", "--offline"]}
+//
+// Commands with a documented --json schema (summary, accounts, account show,
+// quote, pnl, income, market coverage) return that envelope. Commands without
+// one (the market-write commands) run in their normal text mode, so the
+// client gets their rendered output verbatim. Refusals (unknown command,
+// immutable write) return a usage/runtime failure envelope. The command's
+// exit code maps to the HTTP status: 0 → 200, 2 (usage) → 400,
+// 1 (runtime) → 500.
+func (s *Server) runCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if s.Runner == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": "this server does not run commands (it was built without the run endpoint)",
+		})
+		return
+	}
+	var request struct {
+		Args []string `json:"args"`
+	}
+	body, err := readBody(w, r)
+	if err != nil {
+		return
+	}
+	if err := json.Unmarshal(body, &request); err != nil || len(request.Args) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "expected {\"args\": [\"command\", …]} — e.g. {\"args\": [\"summary\"]}",
+		})
+		return
+	}
+	// Market-write commands refetch prices from the network, which can take a
+	// while; the server lock serializes that read-modify-write against the
+	// document endpoints for its whole duration. Read commands run unlocked.
+	if locker, ok := s.Runner.(interface{ KeepsLock(args []string) bool }); ok && locker.KeepsLock(request.Args) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
+	code, stdout, stderr := s.Runner.Run(request.Args)
+	status := http.StatusOK
+	switch code {
+	case 2:
+		status = http.StatusBadRequest
+	case 1:
+		status = http.StatusInternalServerError
+	}
+	// A non-zero exit: the engine's stderr carries the WHY. The body stays
+	// the command's own output; the diagnostic travels in a header so a
+	// client can show it without parsing table text.
+	if code != 0 && stderr != "" {
+		w.Header().Set("X-Error", truncateForHeader(stderr))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(stdout))
+}
+
+// truncateForHeader keeps the last line of a diagnostic (the error, not the
+// output above it), capped for header use.
+func truncateForHeader(text string) string {
+	text = strings.TrimSpace(text)
+	if i := strings.LastIndex(text, "\n"); i >= 0 {
+		text = text[i+1:]
+	}
+	const max = 300
+	if len(text) > max {
+		text = "…" + text[len(text)-max:]
+	}
+	return text
 }
 
 func (s *Server) document(key string) ([]byte, error) {

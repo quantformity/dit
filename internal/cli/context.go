@@ -52,6 +52,12 @@ type Context struct {
 	DisplaySet bool
 	Out        io.Writer
 	Err        io.Writer
+	// StoreSource, when set, answers every store access (Stores, transferRead,
+	// transferSave) with the given stores in place of the usual
+	// remote-connection-then-local fallback. Embedded hosts that already own
+	// the documents use it (the `dit serve` run endpoint): the commands see
+	// the host's stores exactly as they would a local pair.
+	StoreSource func() (store.Store, store.Store, error)
 }
 
 // Stores opens both documents' backing stores.
@@ -63,6 +69,9 @@ type Context struct {
 // remote's: every command that loads or saves through here runs against the
 // connected portfolio instead of the local stores.
 func (c Context) Stores() (ledger store.Store, market store.Store, err error) {
+	if c.StoreSource != nil {
+		return c.StoreSource()
+	}
 	if conn, connErr := c.remoteConnection(); connErr != nil {
 		return store.Store{}, store.Store{}, connErr
 	} else if conn != nil {

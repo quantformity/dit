@@ -40,6 +40,11 @@ type Info struct {
 	Version     string `json:"version,omitempty"`
 	Immutable   bool   `json:"immutable"`
 	AuthEnabled bool   `json:"authEnabled"`
+	// Run advertises the command-execution endpoint (POST /api/v1/run): a
+	// remote UI can ask for a report and get dit's own --json envelope back.
+	// Absent on servers built before it existed — clients fall back to the
+	// document endpoints and a documents-only view.
+	Run bool `json:"run,omitempty"`
 }
 
 // ClientError is a protocol failure with an HTTP status.
@@ -349,6 +354,37 @@ func (c *Connection) Bundle() ([]byte, error) {
 		return nil, err
 	}
 	return data, nil
+}
+
+// Run executes one documented command on the server (POST /api/v1/run) and
+// returns its --json envelope. Code is the CLI exit code (0 ok / 1 runtime /
+// 2 usage); on a non-2xx response the error carries the server's own message
+// (the envelope's "error" field), and envelope holds the raw body for hosts
+// that want to parse the kind as well.
+//
+// A server built before the endpoint existed answers 404/405: hosts should
+// call Verify first and check Info.Run, and degrade to document mode.
+func (c *Connection) Run(args ...string) (code int, envelope string, err error) {
+	body, err := json.Marshal(map[string]any{"args": args})
+	if err != nil {
+		return 1, "", err
+	}
+	raw, _, status, err := c.do(http.MethodPost, "/api/v1/run", "", body)
+	if err != nil {
+		switch status {
+		case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+			return 2, "", &ClientError{Status: status, Message: "the server at " + c.Address + " is too old for the run endpoint — upgrade the dit that serves it"}
+		}
+		return 1, "", err
+	}
+	switch {
+	case status == http.StatusOK:
+		return 0, string(raw), nil
+	case status == http.StatusBadRequest:
+		return 2, string(raw), decodeClientError(raw, status)
+	default:
+		return 1, string(raw), decodeClientError(raw, status)
+	}
 }
 
 // VerifyUnchanged reports whether a document still matches original bytes.

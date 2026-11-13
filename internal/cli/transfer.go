@@ -76,6 +76,17 @@ func transferTarget(c Context, o Options, prefix string) string {
 // Import must not use Context.Stores: its constructors create directories and
 // sqlite schema even when validation will refuse the file.
 func transferRead(c Context, path, key string) ([]byte, error) {
+	if c.StoreSource != nil {
+		ledger, market, err := c.StoreSource()
+		if err != nil {
+			return nil, err
+		}
+		source := market
+		if key == store.PortfolioKey {
+			source = ledger
+		}
+		return source.Load(key)
+	}
 	if conn, err := c.remoteConnection(); err != nil {
 		return nil, err
 	} else if conn != nil {
@@ -813,6 +824,29 @@ func storeBackup(c Context, args []string) error {
 // A saved connection sends the pair to the remote in one request, and the
 // server applies it only if both documents still match what this client read.
 func transferSave(c Context, p *model.Portfolio, m *model.MarketData) error {
+	if c.StoreSource != nil {
+		ledger, market, err := c.StoreSource()
+		if err != nil {
+			return err
+		}
+		if p != nil {
+			data, err := json.Marshal(p)
+			if err != nil {
+				return err
+			}
+			if err := ledger.Save(store.PortfolioKey, data); err != nil {
+				return err
+			}
+		}
+		if m != nil {
+			data, err := json.Marshal(m)
+			if err != nil {
+				return err
+			}
+			return market.Save(store.MarketKey, data)
+		}
+		return nil
+	}
 	if conn, err := c.remoteConnection(); err != nil {
 		return err
 	} else if conn != nil {

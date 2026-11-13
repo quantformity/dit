@@ -121,6 +121,20 @@ against a remote machine's stores:
   skips it). Cloning writes only the local stores — the remote is never
   touched — and works against an `--immutable` serve.
 
+- **Reports for remote UIs.** `POST /api/v1/run` with a body of
+  `{"args": ["command", …]}` runs one documented command in-process on the
+  served documents and returns its output — dit's own `--json` envelope for
+  commands that have a schema (`summary`, `accounts`, `account show`,
+  `quote`, `pnl`, `income`, `market coverage`), rendered text for the rest.
+  The command is allowlisted: the portfolio is never written through the
+  endpoint, and the market-write commands (`update`, `market latest`,
+  `market backfill`) only on a mutable server. The exit code maps to the
+  HTTP status (200/400/500); on a non-zero exit the engine's stderr travels
+  in the `X-Error` header. This is what lets a GUI on another machine —
+  the iPhone client in Pythonista's documents — render real dit reports:
+  the engine runs where the data lives, the client stays a renderer.
+  `GET /api/v1/info` advertises the capability in its `run` field.
+
 While a connection is active, writes go to the REMOTE stores under the same
 rules as local ones: the changed-under-you guard re-checks the remote
 document before a whole-store replace, and the pre-replace backup snapshots

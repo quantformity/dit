@@ -173,6 +173,22 @@ func knownSubcommand(registry Registry, group, sub string) bool {
 	return ok
 }
 
+// ResolveCommandName answers "which command would these words run?" without
+// running it, applying the same defaults resolve() uses (bare `market` is
+// `market latest`, a bare tx id is `tx show`, …). It returns the registered
+// command name, or "" when the words resolve to nothing. The `dit serve` run
+// endpoint gates its allowlist on this.
+func ResolveCommandName(words []string) string {
+	registry := commandSpecs()
+	group, sub, _ := SplitCommandWords(words)
+	rawSub := ""
+	if len(words) >= 2 && !strings.HasPrefix(words[1], "-") {
+		rawSub = words[1]
+	}
+	name, _, _ := resolve(registry, group, sub, rawSub, nil)
+	return name
+}
+
 func isCommandGroup(group string) bool {
 	switch group {
 	case "account", "transaction", "tx", "ticker", "store", "market", "config":
@@ -229,3 +245,8 @@ func jsonIsDocumented(name string) bool {
 	}
 	return false
 }
+
+// JSONDocumented is the exported form for hosts that must know before
+// dispatching: the run endpoint runs these without --json and hands their
+// text output to the client.
+func JSONDocumented(name string) bool { return jsonIsDocumented(name) }
